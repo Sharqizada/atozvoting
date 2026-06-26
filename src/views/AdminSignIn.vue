@@ -7,9 +7,9 @@ import {
 } from '@zxing/library'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { API_BASE_URL } from '../lib/api'
 
 const router = useRouter()
-const API_BASE_URL = 'http://localhost:5000'
 const DEV_LOGIN_BADGE = '15357920'
 const DEV_LOGIN_PASSWORD = '21322455'
 

@@ -80,6 +80,10 @@ const hasPublishedWinners = computed(
 const showConfirmVoteStep = computed(
   () => isCameraModalOpen.value && Boolean(pendingVoteCard.value && verifiedVoter.value),
 )
+const padTwoDigits = (value) => {
+  const normalized = String(value)
+  return normalized.length >= 2 ? normalized : `0${normalized}`
+}
 const countdownParts = computed(() => {
   if (!displayRound.value?.endDate) {
     return null
@@ -127,40 +131,42 @@ const countdownLabel = computed(() => {
   }
 
   const parts = [
-    `${String(countdownParts.value.days).padStart(2, '0')}d`,
-    `${String(countdownParts.value.hours).padStart(2, '0')}h`,
-    `${String(countdownParts.value.minutes).padStart(2, '0')}m`,
-    `${String(countdownParts.value.seconds).padStart(2, '0')}s`,
+    `${padTwoDigits(countdownParts.value.days)}d`,
+    `${padTwoDigits(countdownParts.value.hours)}h`,
+    `${padTwoDigits(countdownParts.value.minutes)}m`,
+    `${padTwoDigits(countdownParts.value.seconds)}s`,
   ]
 
   return parts.join(' : ')
 })
 const categoryOptions = computed(() => ['ALL', ...publicCategories.value.map((category) => category.name)])
-const nomineeCards = computed(() =>
-  publicCategories.value
-    .flatMap((category) =>
-      category.candidates.map((candidate) => ({
-        key: `${category.id}-${candidate.id}`,
-        categoryId: category.id,
-        categoryName: category.name,
-        candidateId: candidate.id,
-        badgeId: candidate.badgeId,
-        fullName: candidate.fullName,
-        departmentName: candidate.departmentName,
-        roleName: candidate.roleName,
-        photoData: candidate.photoData,
-      })),
-    )
-    .filter((card) => {
-      const matchesSearch =
-        !searchTerm.value ||
-        `${card.fullName} ${card.badgeId} ${card.categoryName} ${card.departmentName} ${card.roleName}`
-          .toLowerCase()
-          .includes(searchTerm.value.toLowerCase())
-      const matchesCategory = categoryFilter.value === 'ALL' || card.categoryName === categoryFilter.value
-      return matchesSearch && matchesCategory
-    }),
-)
+const nomineeCards = computed(() => {
+  const allCards = publicCategories.value.reduce((cards, category) => {
+    const categoryCards = category.candidates.map((candidate) => ({
+      key: `${category.id}-${candidate.id}`,
+      categoryId: category.id,
+      categoryName: category.name,
+      candidateId: candidate.id,
+      badgeId: candidate.badgeId,
+      fullName: candidate.fullName,
+      departmentName: candidate.departmentName,
+      roleName: candidate.roleName,
+      photoData: candidate.photoData,
+    }))
+
+    return cards.concat(categoryCards)
+  }, [])
+
+  return allCards.filter((card) => {
+    const matchesSearch =
+      !searchTerm.value ||
+      `${card.fullName} ${card.badgeId} ${card.categoryName} ${card.departmentName} ${card.roleName}`
+        .toLowerCase()
+        .includes(searchTerm.value.toLowerCase())
+    const matchesCategory = categoryFilter.value === 'ALL' || card.categoryName === categoryFilter.value
+    return matchesSearch && matchesCategory
+  })
+})
 
 const formatDateRange = (startDate, endDate) => {
   if (!startDate || !endDate) {
