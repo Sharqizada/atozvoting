@@ -39,8 +39,6 @@ services:
       MYSQL_USER: ${DB_USER:-voting_user}
       MYSQL_PASSWORD: ${DB_PASSWORD:-voting_password}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
-    ports:
-      - "${DB_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:

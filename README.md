@@ -124,6 +124,7 @@ docker compose down -v
 - The Express server serves the built Vue frontend in production.
 - In production, the frontend uses same-origin API requests by default.
 - MySQL data is persisted in the Docker volume `mysql_data`.
+- The MySQL container is intentionally kept internal to Docker and is not exposed on the VPS host port.
 - Do not commit your real `.env` file.
 
 ## GitHub Publish Checklist
