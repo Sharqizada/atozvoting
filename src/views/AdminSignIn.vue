@@ -370,8 +370,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-slate-100 font-sans text-slate-900">
-    <main class="flex min-h-dvh items-center justify-center px-4 py-6 sm:px-6">
+  <div class="min-h-screen bg-slate-100 font-sans text-slate-900">
+    <main class="flex min-h-screen items-center justify-center px-4 py-6 sm:px-6">
       <div class="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-5 shadow-xl sm:max-w-lg sm:p-7">
         <div class="flex items-center justify-center gap-3">
           <div

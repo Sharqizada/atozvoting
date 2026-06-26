@@ -68,13 +68,13 @@ onMounted(loadVotingHome)
 </script>
 
 <template>
-  <div class="relative min-h-dvh overflow-hidden bg-slate-950 font-sans text-white">
+  <div class="relative min-h-screen overflow-hidden bg-slate-950 font-sans text-white">
     <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.25),_transparent_35%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_30%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#111827_100%)]"></div>
     <div class="absolute -left-16 top-16 h-72 w-72 rounded-full bg-emerald-400/20 blur-3xl animate-pulse"></div>
     <div class="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-sky-400/20 blur-3xl animate-pulse"></div>
     <div class="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-violet-400/20 blur-3xl animate-pulse"></div>
 
-    <main class="relative z-10 mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
+    <main class="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
       <header class="flex flex-wrap items-center justify-between gap-4">
         <div class="flex items-center gap-3">
           <div class="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-emerald-300 backdrop-blur">
