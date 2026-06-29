@@ -28,6 +28,7 @@ const toast = ref({
   message: '',
 })
 const isLoadingRound = ref(true)
+const isMobileMenuOpen = ref(false)
 const isPreparingVote = ref(false)
 const isSubmitting = ref(false)
 const isCameraModalOpen = ref(false)
@@ -364,6 +365,11 @@ const loadPublicVotingPage = async () => {
   }
 }
 
+const navigateToLogin = () => {
+  isMobileMenuOpen.value = false
+  router.push('/login')
+}
+
 const refreshCameraList = async () => {
   if (!navigator.mediaDevices?.enumerateDevices) {
     return
@@ -690,36 +696,59 @@ onBeforeUnmount(() => {
       <div class="absolute bottom-10 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-blue-200/20 blur-3xl"></div>
     </div>
 
-    <main class="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-      <div class="sticky top-0 z-30 -mx-4 border-b border-white/60 bg-white/72 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-        <div class="mx-auto flex w-full max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex min-w-0 items-center gap-3 sm:gap-4">
-          <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/90 text-emerald-600 shadow-lg shadow-emerald-100/70 ring-1 ring-white/70 backdrop-blur sm:h-14 sm:w-14">
-            <img
-              v-if="homeSiteLogo"
-              :src="homeSiteLogo"
-              :alt="homeSiteName"
-              class="h-full w-full object-cover"
-            />
-            <span v-else class="material-symbols-outlined text-4xl">how_to_vote</span>
+    <div class="fixed inset-x-0 top-0 z-40 border-b border-white/60 bg-white/78 backdrop-blur">
+      <div class="mx-auto w-full max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-3 sm:gap-4">
+            <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/90 text-emerald-600 shadow-lg shadow-emerald-100/70 ring-1 ring-white/70 backdrop-blur sm:h-14 sm:w-14">
+              <img
+                v-if="homeSiteLogo"
+                :src="homeSiteLogo"
+                :alt="homeSiteName"
+                class="h-full w-full object-cover"
+              />
+              <span v-else class="material-symbols-outlined text-4xl">how_to_vote</span>
+            </div>
+            <div class="min-w-0">
+              <p class="truncate text-lg font-semibold text-slate-900 sm:text-2xl">{{ homeSiteName }}</p>
+              <p class="line-clamp-2 text-xs text-slate-500 sm:text-sm">{{ homeSiteTagline }}</p>
+            </div>
           </div>
-          <div class="min-w-0">
-            <p class="truncate text-lg font-semibold text-slate-900 sm:text-2xl">{{ homeSiteName }}</p>
-            <p class="line-clamp-2 text-xs text-slate-500 sm:text-sm">{{ homeSiteTagline }}</p>
-          </div>
+
+          <button
+            type="button"
+            @click="isMobileMenuOpen = !isMobileMenuOpen"
+            class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/70 bg-white/85 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white sm:hidden"
+            :aria-expanded="isMobileMenuOpen"
+            aria-label="Toggle menu"
+          >
+            <span class="material-symbols-outlined text-xl">{{ isMobileMenuOpen ? 'close' : 'menu' }}</span>
+          </button>
+
+          <button
+            type="button"
+            @click="navigateToLogin"
+            class="hidden h-11 items-center justify-center gap-2 rounded-xl border border-white/70 bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition hover:bg-white sm:inline-flex"
+          >
+            <span class="material-symbols-outlined text-base">admin_panel_settings</span>
+            Login
+          </button>
         </div>
 
-        <button
-          type="button"
-          @click="router.push('/login')"
-          class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/70 bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition hover:bg-white sm:w-auto"
-        >
-          <span class="material-symbols-outlined text-base">admin_panel_settings</span>
-          Admin Login
-        </button>
+        <div v-if="isMobileMenuOpen" class="mt-3 rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm sm:hidden">
+          <button
+            type="button"
+            @click="navigateToLogin"
+            class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-600 transition hover:bg-slate-50"
+          >
+            <span class="material-symbols-outlined text-base">admin_panel_settings</span>
+            Login
+          </button>
+        </div>
       </div>
-      </div>
+    </div>
 
+    <main class="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 pb-4 pt-24 sm:px-6 sm:pt-28 lg:px-8">
       <section class="mt-4 overflow-hidden rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur sm:mt-6 sm:rounded-[36px] sm:p-8">
         <div class="grid gap-6 lg:grid-cols-[1.5fr_0.9fr]">
           <div class="relative overflow-hidden rounded-[32px] bg-[linear-gradient(135deg,_rgba(5,150,105,0.96),_rgba(14,165,233,0.92))] px-6 py-7 text-white shadow-[0_18px_50px_rgba(16,185,129,0.28)] sm:px-8">

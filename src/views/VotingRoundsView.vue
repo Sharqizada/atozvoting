@@ -1,12 +1,15 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import AdminShell from '../components/AdminShell.vue'
 import { useAdminPage } from '../composables/useAdminPage'
 import { deleteJson, fetchJson, postJson, putJson } from '../lib/api'
 
+const ROUND_DRAFT_STORAGE_KEY = 'voting-round-create-draft'
+
 const { data, error, load } = useAdminPage('/api/voting-rounds', {
   stats: [],
   rounds: [],
+  categoryOptions: [],
   employeeOptions: [],
   pagination: {
     showing: '',
@@ -15,6 +18,7 @@ const { data, error, load } = useAdminPage('/api/voting-rounds', {
 
 const stats = computed(() => data.value.stats || [])
 const rounds = computed(() => data.value.rounds || [])
+const categoryOptions = computed(() => data.value.categoryOptions || [])
 const employeeOptions = computed(() => data.value.employeeOptions || [])
 const searchTerm = ref('')
 const statusFilter = ref('ALL')
@@ -41,6 +45,7 @@ const createForm = reactive({
   startDate: '',
   endDate: '',
   status: 'UPCOMING',
+  categoryIds: [],
   participantIds: [],
 })
 
@@ -67,6 +72,9 @@ const filteredEmployeeOptions = computed(() =>
 const selectedEmployees = computed(() =>
   employeeOptions.value.filter((employee) => createForm.participantIds.includes(employee.id)),
 )
+const selectedCategories = computed(() =>
+  categoryOptions.value.filter((category) => createForm.categoryIds.includes(category.id)),
+)
 
 const paginationLabel = computed(() => `Showing 1 to ${filteredRounds.value.length} of ${rounds.value.length} rounds`)
 const winnerCards = computed(() => {
@@ -84,7 +92,52 @@ const resetForm = () => {
   createForm.startDate = ''
   createForm.endDate = ''
   createForm.status = 'UPCOMING'
+  createForm.categoryIds = []
   createForm.participantIds = []
+}
+
+const persistCreateDraft = () => {
+  if (editingRoundId.value || !showCreateModal.value) {
+    return
+  }
+
+  localStorage.setItem(
+    ROUND_DRAFT_STORAGE_KEY,
+    JSON.stringify({
+      name: createForm.name,
+      description: createForm.description,
+      startDate: createForm.startDate,
+      endDate: createForm.endDate,
+      status: createForm.status,
+      categoryIds: createForm.categoryIds,
+      participantIds: createForm.participantIds,
+    }),
+  )
+}
+
+const restoreCreateDraft = () => {
+  const draft = localStorage.getItem(ROUND_DRAFT_STORAGE_KEY)
+
+  if (!draft) {
+    return
+  }
+
+  try {
+    const parsedDraft = JSON.parse(draft)
+    createForm.name = parsedDraft.name || ''
+    createForm.description = parsedDraft.description || ''
+    createForm.startDate = parsedDraft.startDate || ''
+    createForm.endDate = parsedDraft.endDate || ''
+    createForm.status = parsedDraft.status || 'UPCOMING'
+    createForm.categoryIds = Array.isArray(parsedDraft.categoryIds) ? parsedDraft.categoryIds : []
+    createForm.participantIds = Array.isArray(parsedDraft.participantIds) ? parsedDraft.participantIds : []
+  } catch {
+    localStorage.removeItem(ROUND_DRAFT_STORAGE_KEY)
+  }
+}
+
+const clearCreateDraft = () => {
+  localStorage.removeItem(ROUND_DRAFT_STORAGE_KEY)
 }
 
 const openCreateModal = () => {
@@ -93,6 +146,7 @@ const openCreateModal = () => {
   employeeSearch.value = ''
   editingRoundId.value = null
   resetForm()
+  restoreCreateDraft()
   showCreateModal.value = true
 }
 
@@ -107,6 +161,7 @@ const openEditModal = (round) => {
   createForm.startDate = round.rawStartDate
   createForm.endDate = round.rawEndDate
   createForm.status = round.status
+  createForm.categoryIds = [...(round.categoryIds || [])]
   createForm.participantIds = [...(round.participantIds || [])]
   showCreateModal.value = true
 }
@@ -157,18 +212,49 @@ const toggleParticipant = (employeeId) => {
   createForm.participantIds = [...createForm.participantIds, employeeId]
 }
 
+const toggleCategory = (categoryId) => {
+  if (createForm.categoryIds.includes(categoryId)) {
+    createForm.categoryIds = createForm.categoryIds.filter((id) => id !== categoryId)
+    return
+  }
+
+  createForm.categoryIds = [...createForm.categoryIds, categoryId]
+}
+
+watch(
+  () => ({
+    name: createForm.name,
+    description: createForm.description,
+    startDate: createForm.startDate,
+    endDate: createForm.endDate,
+    status: createForm.status,
+    categoryIds: [...createForm.categoryIds],
+    participantIds: [...createForm.participantIds],
+  }),
+  () => {
+    persistCreateDraft()
+  },
+  { deep: true },
+)
+
 const submitRound = async () => {
   submitError.value = ''
   submitSuccess.value = ''
   isSubmitting.value = true
 
   try {
+    if (!createForm.categoryIds.length) {
+      submitError.value = 'Select at least one category.'
+      return
+    }
+
     const payload = {
       name: createForm.name,
       description: createForm.description,
       startDate: createForm.startDate,
       endDate: createForm.endDate,
       status: createForm.status,
+      categoryIds: createForm.categoryIds,
       participantIds: createForm.participantIds,
     }
 
@@ -181,6 +267,9 @@ const submitRound = async () => {
     }
 
     await load()
+    if (!editingRoundId.value) {
+      clearCreateDraft()
+    }
     closeCreateModal()
   } catch (requestError) {
     submitError.value =
@@ -555,38 +644,62 @@ const openWinnerPreview = async (round) => {
                   class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"
                 ></textarea>
               </label>
-              <label class="block">
-                <span class="mb-2 block text-sm text-slate-600">Random Round ID</span>
-                <input
-                  :value="createForm.roundId || 'Auto-generated after save'"
-                  type="text"
-                  readonly
-                  class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500 outline-none"
-                />
-              </label>
-              <label class="block">
-                <span class="mb-2 block text-sm text-slate-600">Start Date</span>
-                <input v-model="createForm.startDate" type="date" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
-              </label>
-              <label class="block">
-                <span class="mb-2 block text-sm text-slate-600">End Date</span>
-                <input v-model="createForm.endDate" type="date" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
-              </label>
-              <label class="block">
-                <span class="mb-2 block text-sm text-slate-600">Status</span>
-                <select v-model="createForm.status" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none">
-                  <option value="UPCOMING">Upcoming</option>
-                  <option value="ACTIVE">Live</option>
-                  <option value="COMPLETED">Completed</option>
-                </select>
-                <p class="mt-2 text-xs text-slate-400">Only one round can be live at a time. You can also control this from the row action buttons.</p>
-              </label>
+              <input v-model="createForm.roundId" type="hidden" />
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="block">
+                  <span class="mb-2 block text-sm text-slate-600">Start Date</span>
+                  <input v-model="createForm.startDate" type="date" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
+                </label>
+                <label class="block">
+                  <span class="mb-2 block text-sm text-slate-600">End Date</span>
+                  <input v-model="createForm.endDate" type="date" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
+                </label>
+              </div>
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="block">
+                  <span class="mb-2 block text-sm text-slate-600">Status</span>
+                  <select v-model="createForm.status" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none">
+                    <option value="UPCOMING">Upcoming</option>
+                    <option value="ACTIVE">Live</option>
+                    <option value="COMPLETED">Completed</option>
+                  </select>
+                  <p class="mt-2 text-xs text-slate-400">Only one round can be live at a time. You can also control this from the row action buttons.</p>
+                </label>
+                <div class="block">
+                  <span class="mb-2 block text-sm text-slate-600">Categories</span>
+                  <div class="rounded-2xl border border-slate-200 bg-white p-3">
+                    <div class="flex flex-wrap gap-2">
+                      <button
+                        v-for="category in categoryOptions"
+                        :key="category.id"
+                        type="button"
+                        @click="toggleCategory(category.id)"
+                        class="rounded-full border px-3 py-2 text-xs font-medium transition"
+                        :class="createForm.categoryIds.includes(category.id) ? 'border-blue-200 bg-blue-50 text-blue-600' : 'border-slate-200 bg-slate-50 text-slate-600'"
+                      >
+                        {{ category.name }}
+                      </button>
+                    </div>
+                    <p v-if="!categoryOptions.length" class="text-sm text-slate-500">No active categories are available.</p>
+                  </div>
+                  <p class="mt-2 text-xs text-slate-400">Select at least one category.</p>
+                </div>
+              </div>
 
               <div class="rounded-3xl border border-slate-200 bg-slate-50 p-4">
                 <div class="flex items-center justify-between gap-4">
                   <p class="text-sm font-medium text-slate-700">Selected Nominees</p>
                   <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600">
                     {{ createForm.participantIds.length }} selected
+                  </span>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2" v-if="selectedCategories.length">
+                  <span
+                    v-for="category in selectedCategories"
+                    :key="category.id"
+                    class="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-600"
+                  >
+                    {{ category.name }}
                   </span>
                 </div>
                 <div class="mt-3 flex flex-wrap gap-2">

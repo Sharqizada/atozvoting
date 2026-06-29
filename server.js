@@ -957,10 +957,12 @@ const getActiveCategories = async (runner = pool) =>
     `,
   )
 
-const syncRoundCategories = async (roundId, runner = pool) => {
+const syncRoundCategories = async (roundId, categoryIds = null, runner = pool) => {
   await executeWith(runner, 'DELETE FROM voting_round_categories WHERE voting_round_id = ?', [roundId])
 
-  const categories = await getActiveCategories(runner)
+  const categories = categoryIds === null
+    ? await getActiveCategories(runner)
+    : parseIdList(categoryIds).map((categoryId) => ({ id: categoryId }))
 
   if (!categories.length) {
     return
@@ -1886,6 +1888,14 @@ app.get('/api/voting-rounds', async (_req, res) => {
         ORDER BY categories.name ASC
       `,
     )
+    const categoryOptions = await query(
+      `
+        SELECT id, name
+        FROM categories
+        WHERE is_active = 1
+        ORDER BY name ASC
+      `,
+    )
     const employeeOptions = await query(
       `
         SELECT id, badge_id, full_name, department_name, role_name, employment_status, photo_data
@@ -1963,10 +1973,15 @@ app.get('/api/voting-rounds', async (_req, res) => {
           dot: round.status === 'ACTIVE' ? 'bg-emerald-500' : round.status === 'UPCOMING' ? 'bg-blue-500' : 'bg-slate-400',
           rawStartDate: formatDateValue(round.start_date),
           rawEndDate: formatDateValue(round.end_date),
+          categoryIds: (categoryMap.get(round.id) || []).map((category) => category.id),
           participantIds: (participantMap.get(round.id) || []).map((participant) => participant.id),
           participantPreview: participantMap.get(round.id) || [],
         }
       }),
+      categoryOptions: categoryOptions.map((category) => ({
+        id: category.id,
+        name: category.name,
+      })),
       employeeOptions: employeeOptions.map((employee) => ({
         id: employee.id,
         badgeId: employee.badge_id,
@@ -2920,10 +2935,11 @@ app.post('/api/voting-rounds', async (req, res) => {
   const endDate = normalizeVotingRoundDateInput(req.body?.endDate, 'end')
   const requestedStatus = normalizeVotingRoundStatus(req.body?.status)
   const status = requestedStatus
+  const categoryIds = parseIdList(req.body?.categoryIds)
   const participantIds = parseIdList(req.body?.participantIds)
 
-  if (!name || !startDate || !endDate || !participantIds.length) {
-    return res.status(400).json({ message: 'Round name, dates, and at least one associate are required.' })
+  if (!name || !startDate || !endDate || !categoryIds.length || !participantIds.length) {
+    return res.status(400).json({ message: 'Round name, dates, at least one category, and at least one associate are required.' })
   }
 
   if (new Date(startDate) > new Date(endDate)) {
@@ -2946,7 +2962,7 @@ app.post('/api/voting-rounds', async (req, res) => {
     )
 
     await syncRoundParticipants(result.insertId, participantIds, connection)
-    await syncRoundCategories(result.insertId, connection)
+    await syncRoundCategories(result.insertId, categoryIds, connection)
 
     if (requestedStatus === 'ACTIVE') {
       await activateVotingRound(result.insertId, connection)
@@ -2975,9 +2991,10 @@ app.put('/api/voting-rounds/:id', async (req, res) => {
   const endDate = normalizeVotingRoundDateInput(req.body?.endDate, 'end')
   const requestedStatus = normalizeVotingRoundStatus(req.body?.status)
   const status = requestedStatus
+  const categoryIds = parseIdList(req.body?.categoryIds)
   const participantIds = parseIdList(req.body?.participantIds)
 
-  if (!roundId || !name || !startDate || !endDate || !participantIds.length) {
+  if (!roundId || !name || !startDate || !endDate || !categoryIds.length || !participantIds.length) {
     return res.status(400).json({ message: 'Valid round data is required.' })
   }
 
@@ -3000,7 +3017,7 @@ app.put('/api/voting-rounds/:id', async (req, res) => {
     )
 
     await syncRoundParticipants(roundId, participantIds, connection)
-    await syncRoundCategories(roundId, connection)
+    await syncRoundCategories(roundId, categoryIds, connection)
 
     if (requestedStatus === 'ACTIVE') {
       await activateVotingRound(roundId, connection)

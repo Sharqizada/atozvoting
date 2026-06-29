@@ -92,7 +92,7 @@ onMounted(loadVotingHome)
           class="inline-flex h-11 items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 text-sm text-white backdrop-blur transition hover:bg-white/15"
         >
           <span class="material-symbols-outlined text-base">admin_panel_settings</span>
-          Admin Login
+          Login
         </button>
       </header>
 
