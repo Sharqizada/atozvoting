@@ -1074,13 +1074,13 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="pointer-events-none absolute inset-0">
-              <div class="absolute inset-x-8 top-1/2 h-20 -translate-y-1/2 rounded-3xl border border-white/30 bg-white/5"></div>
+              <div class="absolute inset-x-4 top-1/2 h-20 -translate-y-1/2 rounded-3xl border border-white/30 bg-white/5 sm:inset-x-5"></div>
               <div class="absolute left-6 top-1/2 h-6 w-6 -translate-y-10 border-l-4 border-t-4 border-emerald-500"></div>
               <div class="absolute right-6 top-1/2 h-6 w-6 -translate-y-10 border-r-4 border-t-4 border-emerald-500"></div>
               <div class="absolute left-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-l-4 border-emerald-500"></div>
               <div class="absolute right-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-r-4 border-emerald-500"></div>
               <div
-                class="absolute inset-x-10 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-emerald-400 to-transparent"
+                class="absolute inset-x-6 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-emerald-400 to-transparent sm:inset-x-7"
               ></div>
             </div>
           </div>
