@@ -22,6 +22,9 @@ const employeeSearch = ref('')
 const copiedRoundId = ref('')
 const showCreateModal = ref(false)
 const showWinnerModal = ref(false)
+const showDetailModal = ref(false)
+const detailModalMode = ref('duration')
+const detailModalRound = ref(null)
 const editingRoundId = ref(null)
 const submitError = ref('')
 const submitSuccess = ref('')
@@ -118,6 +121,17 @@ const closeWinnerModal = () => {
     round: null,
     winners: [],
   }
+}
+
+const openRoundDetailModal = (mode, round) => {
+  detailModalMode.value = mode
+  detailModalRound.value = round
+  showDetailModal.value = true
+}
+
+const closeRoundDetailModal = () => {
+  showDetailModal.value = false
+  detailModalRound.value = null
 }
 
 const copyRoundId = async (roundId) => {
@@ -377,12 +391,19 @@ const openWinnerPreview = async (round) => {
                 </span>
               </td>
               <td class="px-4 py-5 text-xs text-slate-500">
-                <p>{{ round.duration[0] }}</p>
-                <p class="my-1">to</p>
-                <p>{{ round.duration[1] }}</p>
+                <p class="font-medium text-slate-700">{{ round.duration[2] }}</p>
+                <p class="mt-1">{{ round.duration[0] }}</p>
+                <p class="mt-1">{{ round.duration[1] }}</p>
                 <span class="mt-2 inline-flex rounded-lg px-3 py-1 font-medium" :class="round.durationClass">
-                  {{ round.duration[2] }}
+                  {{ round.status }}
                 </span>
+                <button
+                  type="button"
+                  @click="openRoundDetailModal('duration', round)"
+                  class="mt-3 block text-xs font-semibold text-blue-600 transition hover:text-blue-700"
+                >
+                  View details
+                </button>
               </td>
               <td class="px-4 py-5">
                 <div class="flex items-center gap-2">
@@ -438,6 +459,13 @@ const openWinnerPreview = async (round) => {
                       +{{ round.participantPreview.length - 3 }} more
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    @click="openRoundDetailModal('nominees', round)"
+                    class="text-xs font-semibold text-blue-600 transition hover:text-blue-700"
+                  >
+                    View full list
+                  </button>
                 </div>
               </td>
               <td class="px-4 py-5">
@@ -721,6 +749,75 @@ const openWinnerPreview = async (round) => {
           <span>Total votes: {{ winnerPreview.round.totalVotes || 0 }}</span>
           <span>Valid votes: {{ winnerPreview.round.validVotes || 0 }}</span>
           <span>{{ winnerPreview.round.status || 'Completed' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showDetailModal && detailModalRound" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">
+              {{ detailModalMode === 'duration' ? 'Duration Details' : 'Assigned Nominees' }}
+            </p>
+            <p class="mt-1 text-sm text-slate-500">{{ detailModalRound.name }}</p>
+          </div>
+          <button type="button" @click="closeRoundDetailModal" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500">
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div v-if="detailModalMode === 'duration'" class="space-y-4">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Start Date</p>
+              <p class="mt-2 text-base font-semibold text-slate-900">{{ detailModalRound.duration[0] }}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">End Date</p>
+              <p class="mt-2 text-base font-semibold text-slate-900">{{ detailModalRound.duration[1] }}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Round Status</p>
+              <p class="mt-2 text-base font-semibold text-slate-900">{{ detailModalRound.duration[2] }}</p>
+            </div>
+          </div>
+
+          <div v-else class="space-y-3">
+            <div
+              v-for="participant in detailModalRound.participantPreview"
+              :key="participant.id"
+              class="flex items-center gap-4 rounded-2xl border border-slate-200 px-4 py-3"
+            >
+              <img
+                v-if="participant.photoData"
+                :src="participant.photoData"
+                :alt="participant.fullName"
+                class="h-12 w-12 rounded-full object-cover"
+              />
+              <div
+                v-else
+                class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500"
+              >
+                <span class="material-symbols-outlined text-base">person</span>
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="font-semibold text-slate-800">{{ participant.fullName }}</p>
+                <p class="mt-1 text-xs text-slate-400">
+                  {{ participant.badgeId }} · {{ participant.departmentName }} / {{ participant.roleName }}
+                </p>
+              </div>
+            </div>
+            <div v-if="!detailModalRound.participantPreview.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+              No nominees assigned to this round yet.
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-slate-200 px-6 py-4">
+          <button type="button" @click="closeRoundDetailModal" class="inline-flex h-11 items-center rounded-xl border border-slate-200 px-4 text-sm text-slate-600">
+            Close
+          </button>
         </div>
       </div>
     </div>

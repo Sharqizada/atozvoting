@@ -787,6 +787,7 @@ const seedSettings = async () => {
   const settings = [
     ['site_name', 'general', 'Inbound Star Voting'],
     ['site_tagline', 'general', 'Recognize. Appreciate. Celebrate.'],
+    ['site_logo', 'general', ''],
     ['timezone', 'general', '(UTC+05:30) Asia/Kolkata'],
     ['date_format', 'general', 'June 3, 2026'],
     ['time_format', 'general', '12 Hour (hh:mm AM/PM)'],
@@ -2305,6 +2306,7 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
         hasActiveRound: false,
         siteName: settings.site_name || 'Inbound Star Voting',
         siteTagline: settings.site_tagline || 'Recognize. Appreciate. Celebrate.',
+        siteLogo: settings.site_logo || '',
         round: null,
         categories: [],
         finishedRound: finishedRound
@@ -2330,6 +2332,7 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
       hasActiveRound: true,
       siteName: settings.site_name || 'Inbound Star Voting',
       siteTagline: settings.site_tagline || 'Recognize. Appreciate. Celebrate.',
+      siteLogo: settings.site_logo || '',
       round: {
         id: activeRound.id,
         name: activeRound.name,
@@ -3282,6 +3285,7 @@ app.get('/api/settings', async (_req, res) => {
       siteInfo: {
         siteName: settings.site_name,
         siteTagline: settings.site_tagline,
+        siteLogo: settings.site_logo || '',
         timezone: settings.timezone,
         dateFormat: settings.date_format,
         timeFormat: settings.time_format,
@@ -3333,6 +3337,7 @@ app.post('/api/settings', async (req, res) => {
     await upsertSettingEntries([
       ['site_name', 'general', siteInfo.siteName || 'Inbound Star Voting'],
       ['site_tagline', 'general', siteInfo.siteTagline || 'Recognize. Appreciate. Celebrate.'],
+      ['site_logo', 'general', siteInfo.siteLogo || ''],
       ['timezone', 'general', siteInfo.timezone || '(UTC+05:30) Asia/Kolkata'],
       ['date_format', 'general', siteInfo.dateFormat || 'June 3, 2026'],
       ['time_format', 'general', siteInfo.timeFormat || '12 Hour (hh:mm AM/PM)'],

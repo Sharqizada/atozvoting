@@ -10,6 +10,7 @@ import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
 
 const router = useRouter()
+const homeSiteLogo = ref('')
 const homeSiteName = ref('Inbound Star Voting')
 const homeSiteTagline = ref('Recognize. Appreciate. Celebrate.')
 const roundSummary = ref(null)
@@ -336,6 +337,7 @@ const loadPublicVotingPage = async () => {
 
   try {
     const response = await fetchJson('/api/voting/live-ballot')
+    homeSiteLogo.value = response.siteLogo || ''
     homeSiteName.value = response.siteName || 'Inbound Star Voting'
     homeSiteTagline.value = response.siteTagline || 'Recognize. Appreciate. Celebrate.'
 
@@ -350,6 +352,7 @@ const loadPublicVotingPage = async () => {
     finishedRoundSummary.value = null
     publicCategories.value = response.categories || []
   } catch (error) {
+    homeSiteLogo.value = ''
     homeSiteName.value = 'Inbound Star Voting'
     homeSiteTagline.value = 'Recognize. Appreciate. Celebrate.'
     roundSummary.value = null
@@ -691,8 +694,14 @@ onBeforeUnmount(() => {
       <div class="sticky top-0 z-30 -mx-4 border-b border-white/60 bg-white/72 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <div class="mx-auto flex w-full max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex min-w-0 items-center gap-3 sm:gap-4">
-          <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/90 text-emerald-600 shadow-lg shadow-emerald-100/70 ring-1 ring-white/70 backdrop-blur sm:h-14 sm:w-14">
-            <span class="material-symbols-outlined text-4xl">how_to_vote</span>
+          <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/90 text-emerald-600 shadow-lg shadow-emerald-100/70 ring-1 ring-white/70 backdrop-blur sm:h-14 sm:w-14">
+            <img
+              v-if="homeSiteLogo"
+              :src="homeSiteLogo"
+              :alt="homeSiteName"
+              class="h-full w-full object-cover"
+            />
+            <span v-else class="material-symbols-outlined text-4xl">how_to_vote</span>
           </div>
           <div class="min-w-0">
             <p class="truncate text-lg font-semibold text-slate-900 sm:text-2xl">{{ homeSiteName }}</p>
