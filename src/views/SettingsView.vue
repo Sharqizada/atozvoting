@@ -144,17 +144,17 @@ const saveSettings = async () => {
       <div class="space-y-6">
         <article class="rounded-3xl border border-slate-200 bg-white p-5">
           <p class="text-2xl font-semibold text-slate-900">General Settings</p>
-          <p class="mt-1 text-sm text-slate-500">Manage general information and basic system settings.</p>
+          <p class="mt-1 text-sm text-slate-500">Manage the public home page title, subtitle, and basic system settings.</p>
 
           <div class="mt-6 rounded-3xl border border-slate-200 p-5">
-            <p class="text-lg font-semibold text-slate-900">Site Information</p>
+            <p class="text-lg font-semibold text-slate-900">Home Page Branding</p>
             <div class="mt-4 grid gap-4 md:grid-cols-2">
               <label class="block">
-                <span class="mb-2 block text-sm text-slate-600">Site Name</span>
+                <span class="mb-2 block text-sm text-slate-600">Home Logo Title</span>
                 <input v-model="siteInfo.siteName" type="text" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
               </label>
               <label class="block">
-                <span class="mb-2 block text-sm text-slate-600">Site Tagline</span>
+                <span class="mb-2 block text-sm text-slate-600">Home Logo Subtitle</span>
                 <input v-model="siteInfo.siteTagline" type="text" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
               </label>
               <div>
@@ -165,7 +165,7 @@ const saveSettings = async () => {
                   </div>
                   <button type="button" class="inline-flex h-11 items-center rounded-xl border border-slate-200 px-4 text-sm text-blue-600">Change Logo</button>
                 </div>
-                <p class="mt-2 text-xs text-slate-400">PNG, JPG up to 2MB</p>
+                <p class="mt-2 text-xs text-slate-400">The title and subtitle above are shown on the public home page.</p>
               </div>
               <label class="block">
                 <span class="mb-2 block text-sm text-slate-600">Timezone</span>

@@ -10,6 +10,8 @@ import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
 
 const router = useRouter()
+const homeSiteName = ref('Inbound Star Voting')
+const homeSiteTagline = ref('Recognize. Appreciate. Celebrate.')
 const roundSummary = ref(null)
 const finishedRoundSummary = ref(null)
 const publicCategories = ref([])
@@ -27,8 +29,6 @@ const toast = ref({
 const isLoadingRound = ref(true)
 const isPreparingVote = ref(false)
 const isSubmitting = ref(false)
-const searchTerm = ref('')
-const categoryFilter = ref('ALL')
 const isCameraModalOpen = ref(false)
 const isCameraOpen = ref(false)
 const isCameraLoading = ref(false)
@@ -195,9 +195,8 @@ const countdownLabel = computed(() => {
 
   return parts.join(' : ')
 })
-const categoryOptions = computed(() => ['ALL', ...publicCategories.value.map((category) => category.name)])
 const nomineeCards = computed(() => {
-  const allCards = publicCategories.value.reduce((cards, category) => {
+  return publicCategories.value.reduce((cards, category) => {
     const categoryCards = category.candidates.map((candidate) => ({
       key: `${category.id}-${candidate.id}`,
       categoryId: category.id,
@@ -212,16 +211,6 @@ const nomineeCards = computed(() => {
 
     return cards.concat(categoryCards)
   }, [])
-
-  return allCards.filter((card) => {
-    const matchesSearch =
-      !searchTerm.value ||
-      `${card.fullName} ${card.badgeId} ${card.categoryName} ${card.departmentName} ${card.roleName}`
-        .toLowerCase()
-        .includes(searchTerm.value.toLowerCase())
-    const matchesCategory = categoryFilter.value === 'ALL' || card.categoryName === categoryFilter.value
-    return matchesSearch && matchesCategory
-  })
 })
 
 const formatDateRange = (startDate, endDate) => {
@@ -347,6 +336,8 @@ const loadPublicVotingPage = async () => {
 
   try {
     const response = await fetchJson('/api/voting/live-ballot')
+    homeSiteName.value = response.siteName || 'Inbound Star Voting'
+    homeSiteTagline.value = response.siteTagline || 'Recognize. Appreciate. Celebrate.'
 
     if (!response.hasActiveRound || !response.round) {
       roundSummary.value = null
@@ -359,6 +350,8 @@ const loadPublicVotingPage = async () => {
     finishedRoundSummary.value = null
     publicCategories.value = response.categories || []
   } catch (error) {
+    homeSiteName.value = 'Inbound Star Voting'
+    homeSiteTagline.value = 'Recognize. Appreciate. Celebrate.'
     roundSummary.value = null
     finishedRoundSummary.value = null
     publicCategories.value = []
@@ -687,84 +680,87 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-100 font-sans text-slate-900">
-    <main class="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
+  <div class="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.18),_transparent_30%),linear-gradient(180deg,_#effdf5_0%,_#f8fafc_38%,_#ecfeff_100%)] font-sans text-slate-900">
+    <div class="pointer-events-none absolute inset-0">
+      <div class="absolute -left-16 top-16 h-56 w-56 rounded-full bg-emerald-200/35 blur-3xl"></div>
+      <div class="absolute right-0 top-0 h-72 w-72 rounded-full bg-cyan-200/30 blur-3xl"></div>
+      <div class="absolute bottom-10 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-blue-200/20 blur-3xl"></div>
+    </div>
+
+    <main class="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
       <div class="flex flex-wrap items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-          <div class="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+        <div class="flex items-center gap-4">
+          <div class="flex h-14 w-14 items-center justify-center rounded-full bg-white/85 text-emerald-600 shadow-lg shadow-emerald-100/70 ring-1 ring-white/70 backdrop-blur">
             <span class="material-symbols-outlined text-4xl">how_to_vote</span>
           </div>
           <div>
-            <p class="text-2xl font-semibold text-slate-900">Associate Voting Home</p>
-            <p class="text-sm text-slate-500">
-              <span v-if="isLoadingRound">Loading live voting page...</span>
-              <span v-else>{{ displayRound?.name || 'No live voting round' }}</span>
-            </p>
+            <p class="text-2xl font-semibold text-slate-900">{{ homeSiteName }}</p>
+            <p class="text-sm text-slate-500">{{ homeSiteTagline }}</p>
           </div>
         </div>
 
         <button
           type="button"
           @click="router.push('/login')"
-          class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-600"
+          class="inline-flex h-11 items-center gap-2 rounded-xl border border-white/70 bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition hover:bg-white"
         >
           <span class="material-symbols-outlined text-base">admin_panel_settings</span>
           Admin Login
         </button>
       </div>
 
-      <section class="mt-6 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="flex items-start gap-4">
-            <div class="flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-50 text-emerald-600">
-              <span class="material-symbols-outlined text-4xl">{{ isFinishedRoundState ? 'hourglass_top' : 'award_star' }}</span>
-            </div>
-            <div>
-              <p class="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-600">{{ heroEyebrowLabel }}</p>
-              <p class="mt-2 text-3xl font-semibold text-slate-900">{{ heroTitle }}</p>
-              <p class="mt-3 max-w-3xl text-sm text-slate-500">
+      <section class="mt-6 overflow-hidden rounded-[36px] border border-white/70 bg-white/80 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur sm:p-8">
+        <div class="grid gap-6 lg:grid-cols-[1.5fr_0.9fr]">
+          <div class="relative overflow-hidden rounded-[32px] bg-[linear-gradient(135deg,_rgba(5,150,105,0.96),_rgba(14,165,233,0.92))] px-6 py-7 text-white shadow-[0_18px_50px_rgba(16,185,129,0.28)] sm:px-8">
+            <div class="absolute right-[-48px] top-[-48px] h-40 w-40 rounded-full border border-white/15 bg-white/10"></div>
+            <div class="absolute bottom-[-64px] left-[-32px] h-44 w-44 rounded-full border border-white/10 bg-white/10"></div>
+            <div class="relative">
+              <p class="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-100">{{ heroEyebrowLabel }}</p>
+              <p class="mt-3 text-3xl font-semibold leading-tight sm:text-4xl">{{ heroTitle }}</p>
+              <p class="mt-4 max-w-2xl text-sm text-emerald-50/90 sm:text-base">
                 {{ heroDescription }}
               </p>
+              <div class="mt-6 flex flex-wrap gap-3">
+                <div class="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm text-white/95 ring-1 ring-white/15">
+                  <span class="material-symbols-outlined text-base">calendar_month</span>
+                  {{ formatDateRange(displayRound?.startDate, displayRound?.endDate) || 'Schedule not available' }}
+                </div>
+                <div class="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm text-white/95 ring-1 ring-white/15">
+                  <span class="material-symbols-outlined text-base">verified_user</span>
+                  One vote per associate
+                </div>
+              </div>
             </div>
           </div>
-          <div class="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-right">
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">Voting Period</p>
-            <p class="mt-2 text-2xl font-semibold text-slate-900">{{ countdownLabel }}</p>
-            <p class="mt-2 text-xs text-slate-500">
-              {{ formatDateRange(displayRound?.startDate, displayRound?.endDate) || 'Not available' }}
+
+          <div class="rounded-[32px] border border-emerald-100 bg-[linear-gradient(180deg,_rgba(236,253,245,0.95),_rgba(255,255,255,0.98))] p-6 shadow-[0_14px_40px_rgba(16,185,129,0.08)]">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Voting Timer</p>
+            <p class="mt-3 text-3xl font-semibold leading-tight text-slate-900">{{ countdownLabel }}</p>
+            <p class="mt-2 text-sm text-slate-500">
+              <span v-if="isLoadingRound">Loading live voting page...</span>
+              <span v-else>{{ displayRound?.name || 'No live voting round' }}</span>
             </p>
+
+            <div class="mt-6 grid gap-3">
+              <div class="rounded-2xl border border-white/80 bg-white/85 px-4 py-4 shadow-sm">
+                <p class="text-sm font-semibold text-slate-900">How It Works</p>
+                <p class="mt-1 text-sm text-slate-500">Choose a nominee card, scan your badge, then confirm your vote.</p>
+              </div>
+              <div class="rounded-2xl border border-white/80 bg-white/85 px-4 py-4 shadow-sm">
+                <p class="text-sm font-semibold text-slate-900">Scanner Tip</p>
+                <p class="mt-1 text-sm text-slate-500">Move the barcode gently across the center scanner line for faster detection.</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="mt-6 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-        <div v-if="!isFinishedRoundState" class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p class="text-xl font-semibold text-slate-900">Nominee Associate Cards ({{ nomineeCards.length }})</p>
-            <p class="mt-1 text-sm text-slate-500">
-              Every card belongs to a category from the live voting round. Press `Vote` on any card to open the scanner.
-            </p>
-          </div>
-
-          <div class="grid gap-3 md:grid-cols-[1fr_auto] lg:w-[430px]">
-            <div class="relative">
-              <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400">search</span>
-              <input
-                v-model="searchTerm"
-                type="text"
-                placeholder="Search nominee associates..."
-                class="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-4 text-sm outline-none"
-              />
-            </div>
-            <label class="inline-flex h-12 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-600">
-              <span class="material-symbols-outlined text-base">filter_alt</span>
-              <select v-model="categoryFilter" class="bg-transparent outline-none">
-                <option v-for="option in categoryOptions" :key="option" :value="option">
-                  {{ option === 'ALL' ? 'All Categories' : option }}
-                </option>
-              </select>
-            </label>
-          </div>
+      <section class="mt-6 rounded-[36px] border border-white/70 bg-white/82 p-6 shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+        <div v-if="!isFinishedRoundState" class="flex flex-col gap-2">
+          <p class="text-xl font-semibold text-slate-900">Choose A Nominee</p>
+          <p class="text-sm text-slate-500">
+            Tap `Vote` on any nominee card below to open the scanner and submit your badge.
+          </p>
         </div>
 
         <div v-if="isFinishedRoundState && !hasPublishedWinners" class="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-12 text-center">
@@ -866,16 +862,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else-if="!nomineeCards.length && !isLoadingRound" class="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
-          No nominee associates match the current search or category filter.
+          No nominee associates are available right now.
         </div>
 
         <div v-else class="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <article
             v-for="card in nomineeCards"
             :key="card.key"
-            class="rounded-3xl border border-slate-200 bg-white p-5 text-center transition hover:border-emerald-300 hover:bg-emerald-50/40"
+            class="rounded-[28px] border border-slate-200/90 bg-[linear-gradient(180deg,_rgba(255,255,255,1),_rgba(248,250,252,0.98))] p-5 text-center shadow-sm transition hover:-translate-y-1 hover:border-emerald-300 hover:shadow-[0_18px_45px_rgba(16,185,129,0.12)]"
           >
-            <div class="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-emerald-700">
+            <div class="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-emerald-700 ring-8 ring-emerald-50">
               <img
                 v-if="card.photoData"
                 :src="card.photoData"
@@ -886,13 +882,15 @@ onBeforeUnmount(() => {
             </div>
 
             <p class="mt-5 text-xl font-semibold text-slate-900">{{ card.fullName }}</p>
-            <p class="mt-2 text-sm font-medium text-emerald-600">{{ card.categoryName }}</p>
-            <p class="mt-2 text-xs text-slate-400">{{ card.departmentName }} / {{ card.roleName }}</p>
+            <div class="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600">
+              {{ card.categoryName }}
+            </div>
+            <p class="mt-3 text-xs text-slate-400">{{ card.departmentName }} / {{ card.roleName }}</p>
 
             <button
               type="button"
               @click="startVoteFlow(card)"
-              class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-300 px-4 py-3 text-sm font-medium text-emerald-600 transition hover:bg-emerald-50"
+              class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-700"
             >
               <span class="material-symbols-outlined text-base">qr_code_scanner</span>
               Vote
@@ -900,43 +898,6 @@ onBeforeUnmount(() => {
           </article>
         </div>
       </section>
-
-      <section
-        class="mt-6 rounded-[32px] p-5 shadow-sm"
-        :class="hasPublishedWinners ? 'border border-slate-200 bg-[linear-gradient(180deg,_rgba(248,250,252,0.96),_rgba(255,255,255,1))]' : 'border border-emerald-100 bg-emerald-50'"
-      >
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div
-              class="flex h-14 w-14 items-center justify-center rounded-2xl bg-white"
-              :class="hasPublishedWinners ? 'text-violet-600' : 'text-emerald-600'"
-            >
-              <span class="material-symbols-outlined text-3xl">{{ isFinishedRoundState ? hasPublishedWinners ? 'shield' : 'hourglass_bottom' : 'verified_user' }}</span>
-            </div>
-            <div>
-              <p class="text-lg font-semibold text-slate-900">
-                {{ isFinishedRoundState ? hasPublishedWinners ? 'Official winners are now live.' : 'Result announcement is pending.' : 'One vote per associate per voting round.' }}
-              </p>
-              <p class="mt-1 text-sm text-slate-500">
-                {{
-                  isFinishedRoundState
-                    ? hasPublishedWinners
-                      ? 'The round is closed and the published top 3 winner list is shown above for all associates.'
-                      : 'The round is closed. Please wait while the admin reviews and announces the winners.'
-                    : 'After you press a card vote button, scan the badge and use the confirm button to submit.'
-                }}
-              </p>
-            </div>
-          </div>
-          <div class="text-sm font-medium" :class="hasPublishedWinners ? 'text-violet-600' : 'text-emerald-600'">
-            {{ isFinishedRoundState ? hasPublishedWinners ? 'Published by admin from the voting rounds panel' : 'Winner list will appear here after admin publishes it' : 'Categories appear automatically from the live round' }}
-          </div>
-        </div>
-      </section>
-
-      <footer class="mt-8 text-center text-xs text-slate-400">
-        © 2026 Inbound Star Voting. All rights reserved.
-      </footer>
     </main>
 
     <div

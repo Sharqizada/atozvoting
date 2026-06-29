@@ -2266,6 +2266,7 @@ app.get('/api/voting/home', async (_req, res) => {
 
 app.get('/api/voting/live-ballot', async (_req, res) => {
   try {
+    const settings = await getSettingMap()
     const activeRound = await getActiveRound()
 
     if (!activeRound) {
@@ -2278,6 +2279,8 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
 
       return res.json({
         hasActiveRound: false,
+        siteName: settings.site_name || 'Inbound Star Voting',
+        siteTagline: settings.site_tagline || 'Recognize. Appreciate. Celebrate.',
         round: null,
         categories: [],
         finishedRound: finishedRound
@@ -2301,6 +2304,8 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
 
     return res.json({
       hasActiveRound: true,
+      siteName: settings.site_name || 'Inbound Star Voting',
+      siteTagline: settings.site_tagline || 'Recognize. Appreciate. Celebrate.',
       round: {
         id: activeRound.id,
         name: activeRound.name,

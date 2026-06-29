@@ -327,7 +327,7 @@ const verifyBadge = async (fromScanner = false) => {
 
     detectedAdmin.value = data.admin
     successMessage.value = fromScanner
-      ? 'Badge scanned and verified successfully.'
+      ? 'Badge Scanned and Verified Successfully'
       : 'Badge verified successfully.'
 
     return true
@@ -436,16 +436,6 @@ onBeforeUnmount(() => {
                 </span>
               </button>
             </label>
-
-            <div
-              v-if="detectedAdmin"
-              class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3"
-            >
-              <p class="text-sm font-medium text-emerald-700">{{ detectedAdmin.full_name }}</p>
-              <p class="mt-1 text-sm text-slate-500">
-                {{ detectedAdmin.role }} · {{ detectedAdmin.badge_code }}
-              </p>
-            </div>
 
             <div
               v-if="errorMessage"
