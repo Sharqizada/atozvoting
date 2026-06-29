@@ -7,7 +7,7 @@ import {
 } from '@zxing/library'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { API_BASE_URL } from '../lib/api'
+import { postJson } from '../lib/api'
 
 const router = useRouter()
 const DEV_LOGIN_BADGE = '15357920'
@@ -15,7 +15,6 @@ const DEV_LOGIN_PASSWORD = '21322455'
 
 const password = ref('')
 const badgeCode = ref('')
-const rememberMe = ref(true)
 const showPassword = ref(false)
 const isSubmitting = ref(false)
 const isVerifyingBadge = ref(false)
@@ -69,6 +68,12 @@ const fillDevelopmentLogin = () => {
   badgeCode.value = DEV_LOGIN_BADGE
   password.value = DEV_LOGIN_PASSWORD
   detectedAdmin.value = null
+}
+
+const persistAdminSession = (admin) => {
+  localStorage.removeItem('adminSession')
+  sessionStorage.removeItem('adminSession')
+  localStorage.setItem('adminSession', JSON.stringify(admin))
 }
 
 const stopCamera = () => {
@@ -150,7 +155,7 @@ const playScanBeep = async () => {
   }
 }
 
-const handleScannedCode = async (scannedValue, format) => {
+const handleScannedCode = async (scannedValue) => {
   const normalizedValue = scannedValue?.trim()
   const now = Date.now()
 
@@ -271,23 +276,9 @@ const verifyBadge = async (fromScanner = false) => {
   isVerifyingBadge.value = true
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/auth/badge`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        badgeCode: badgeCode.value.trim(),
-      }),
+    const data = await postJson('/api/auth/badge', {
+      badgeCode: badgeCode.value.trim(),
     })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      detectedAdmin.value = null
-      errorMessage.value = data.message || 'Badge verification failed.'
-      return false
-    }
 
     detectedAdmin.value = data.admin
     successMessage.value = fromScanner
@@ -328,32 +319,12 @@ const submitLogin = async () => {
   isSubmitting.value = true
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        badgeCode: badgeCode.value.trim(),
-        password: password.value,
-      }),
+    const data = await postJson('/api/auth/login', {
+      badgeCode: badgeCode.value.trim(),
+      password: password.value,
     })
 
-    const data = await response.json()
-
-    if (!response.ok) {
-      errorMessage.value = data.message || 'Login failed.'
-      return
-    }
-
-    localStorage.removeItem('adminSession')
-    sessionStorage.removeItem('adminSession')
-
-    if (rememberMe.value) {
-      localStorage.setItem('adminSession', JSON.stringify(data.admin))
-    } else {
-      sessionStorage.setItem('adminSession', JSON.stringify(data.admin))
-    }
+    persistAdminSession(data.admin)
 
     successMessage.value = 'Login successful. Redirecting to dashboard...'
     router.push('/admin/dashboard')
@@ -374,11 +345,14 @@ onBeforeUnmount(() => {
     <main class="flex min-h-screen items-center justify-center px-4 py-6 sm:px-6">
       <div class="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-5 shadow-xl sm:max-w-lg sm:p-7">
         <div class="flex items-center justify-center gap-3">
-          <div
-            class="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 sm:h-16 sm:w-16"
+          <button
+            type="button"
+            @click="router.push('/')"
+            aria-label="Go to home"
+            class="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 transition hover:bg-blue-100 sm:h-16 sm:w-16"
           >
             <span class="material-symbols-outlined text-4xl">shield_lock</span>
-          </div>
+          </button>
         </div>
 
         <div class="mt-6 space-y-4">
@@ -399,7 +373,7 @@ onBeforeUnmount(() => {
                 :disabled="isCameraLoading"
                 class="inline-flex h-[58px] w-16 shrink-0 items-center justify-center bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
-                <span class="material-symbols-outlined text-lg">photo_camera</span>
+                <span class="material-symbols-outlined text-lg">barcode_scanner</span>
               </button>
             </div>
 
@@ -426,17 +400,6 @@ onBeforeUnmount(() => {
               <p class="mt-1 text-sm text-slate-500">
                 {{ detectedAdmin.role }} · {{ detectedAdmin.badge_code }}
               </p>
-            </div>
-
-            <div class="mt-4 flex items-center justify-between gap-4">
-              <label class="inline-flex items-center gap-3 text-sm text-slate-500">
-                <input
-                  v-model="rememberMe"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                />
-                Remember me
-              </label>
             </div>
 
             <div
@@ -473,15 +436,6 @@ onBeforeUnmount(() => {
                 {{ isSubmitting ? 'Signing In...' : isVerifyingBadge ? 'Checking...' : 'Continue' }}
               </button>
             </div>
-
-            <button
-              type="button"
-              @click="router.push('/')"
-              class="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-base font-medium text-slate-700 transition hover:bg-slate-100"
-            >
-              <span class="material-symbols-outlined text-xl">how_to_vote</span>
-              Open Voting Home
-            </button>
           </div>
         </div>
       </div>
