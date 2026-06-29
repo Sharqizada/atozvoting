@@ -1,7 +1,8 @@
 <script setup>
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import AdminShell from '../components/AdminShell.vue'
 import { useAdminPage } from '../composables/useAdminPage'
+import { hexToRgba, resolveBrandingColors } from '../lib/branding'
 import { postJson } from '../lib/api'
 
 const { data, error, load } = useAdminPage('/api/settings', {
@@ -14,6 +15,7 @@ const { data, error, load } = useAdminPage('/api/settings', {
     timeFormat: '',
     currency: '',
   },
+  brandingColors: resolveBrandingColors(),
   votingSettings: {
     allowDuplicateVoting: false,
     requireVoteConfirmation: false,
@@ -41,6 +43,7 @@ const siteInfo = reactive({
   timeFormat: '',
   currency: '',
 })
+const brandingColors = reactive(resolveBrandingColors())
 const votingSettings = reactive({
   allowDuplicateVoting: false,
   requireVoteConfirmation: false,
@@ -54,11 +57,36 @@ const emailSettings = reactive({
   fromName: '',
   smtpProvider: '',
 })
+const brandingFields = [
+  { key: 'primaryColor', label: 'Primary Buttons', description: 'Main vote and save button color.' },
+  { key: 'secondaryColor', label: 'Hero Gradient', description: 'Secondary accent used in gradients and highlights.' },
+  { key: 'accentColor', label: 'Icons & Hover', description: 'Icon color and hover border accent.' },
+  { key: 'surfaceColor', label: 'Soft Background', description: 'Soft tinted cards and helper panels.' },
+  { key: 'borderColor', label: 'Border Color', description: 'Visible border and outline accent color.' },
+]
+const previewBranding = computed(() => resolveBrandingColors(brandingColors))
+const brandingHeroPreviewStyle = computed(() => ({
+  background: `linear-gradient(135deg, ${previewBranding.value.primaryColor}, ${previewBranding.value.secondaryColor})`,
+  boxShadow: `0 22px 48px ${hexToRgba(previewBranding.value.primaryColor, 0.22)}`,
+}))
+const brandingSurfacePreviewStyle = computed(() => ({
+  backgroundColor: previewBranding.value.surfaceColor,
+  borderColor: previewBranding.value.borderColor,
+}))
+const brandingButtonPreviewStyle = computed(() => ({
+  backgroundColor: previewBranding.value.primaryColor,
+  boxShadow: `0 12px 30px ${hexToRgba(previewBranding.value.primaryColor, 0.24)}`,
+}))
+const brandingIconPreviewStyle = computed(() => ({
+  color: previewBranding.value.accentColor,
+  backgroundColor: hexToRgba(previewBranding.value.accentColor, 0.12),
+}))
 
 watch(
   data,
   (value) => {
     Object.assign(siteInfo, value.siteInfo || {})
+    Object.assign(brandingColors, resolveBrandingColors(value.brandingColors || {}))
     Object.assign(votingSettings, value.votingSettings || {})
     Object.assign(emailSettings, value.emailSettings || {})
   },
@@ -154,6 +182,7 @@ const saveSettings = async () => {
   try {
     await postJson('/api/settings', {
       siteInfo,
+      brandingColors: resolveBrandingColors(brandingColors),
       votingSettings,
       emailSettings,
     })
@@ -265,6 +294,61 @@ const saveSettings = async () => {
                 <option>INR - Indian Rupee (Rs)</option>
                 <option>EUR - Euro (EUR)</option>
               </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="mt-6 grid gap-6 xl:grid-cols-[1.05fr_1fr]">
+          <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+            <p class="text-base font-semibold text-slate-900">Branding Preview</p>
+            <p class="mt-1 text-sm text-slate-500">Preview how the public website colors will look on the hero, buttons, icons, and soft panels.</p>
+
+            <div class="mt-5 rounded-[28px] p-5 text-white" :style="brandingHeroPreviewStyle">
+              <div class="flex items-center gap-3">
+                <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15" :style="brandingIconPreviewStyle">
+                  <span class="material-symbols-outlined text-2xl">palette</span>
+                </div>
+                <div>
+                  <p class="text-lg font-semibold">{{ siteInfo.siteName || 'Website branding' }}</p>
+                  <p class="text-sm text-white/85">{{ siteInfo.siteTagline || 'Preview the public website palette before saving.' }}</p>
+                </div>
+              </div>
+
+              <div class="mt-5 flex flex-wrap gap-3">
+                <button type="button" class="inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm font-medium text-white" :style="brandingButtonPreviewStyle">
+                  <span class="material-symbols-outlined text-base">how_to_vote</span>
+                  Vote Button
+                </button>
+                <div class="inline-flex h-11 items-center gap-2 rounded-2xl border bg-white/10 px-4 text-sm font-medium text-white/95" :style="{ borderColor: hexToRgba(previewBranding.borderColor, 0.75) }">
+                  <span class="material-symbols-outlined text-base" :style="{ color: previewBranding.accentColor }">verified_user</span>
+                  Icon Accent
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-5 rounded-3xl border p-4" :style="brandingSurfacePreviewStyle">
+              <p class="text-sm font-semibold text-slate-900">Border & Hover Surface</p>
+              <p class="mt-1 text-sm text-slate-600">This tinted surface is used for soft cards, help panels, and highlighted areas on mobile and desktop views.</p>
+            </div>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label v-for="field in brandingFields" :key="field.key" class="block rounded-3xl border border-slate-200 bg-white p-4">
+              <span class="block text-sm font-medium text-slate-700">{{ field.label }}</span>
+              <span class="mt-1 block text-xs text-slate-400">{{ field.description }}</span>
+              <div class="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+                <input
+                  v-model="brandingColors[field.key]"
+                  type="color"
+                  class="h-11 w-14 cursor-pointer rounded-xl border border-slate-200 bg-white p-1"
+                />
+                <input
+                  v-model="brandingColors[field.key]"
+                  type="text"
+                  maxlength="7"
+                  class="h-11 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm uppercase outline-none"
+                />
+              </div>
             </label>
           </div>
         </div>

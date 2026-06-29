@@ -35,8 +35,92 @@ const allowedCorsOrigins = (
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean)
+const DEFAULT_SITE_INFO = Object.freeze({
+  siteName: 'Inbound Star Voting',
+  siteTagline: 'Recognize. Appreciate. Celebrate.',
+  siteLogo: '',
+  timezone: '(UTC+05:30) Asia/Kolkata',
+  dateFormat: 'June 3, 2026',
+  timeFormat: '12 Hour (hh:mm AM/PM)',
+  currency: 'USD - US Dollar ($)',
+})
+const DEFAULT_BRANDING_COLORS = Object.freeze({
+  primaryColor: '#059669',
+  secondaryColor: '#0EA5E9',
+  accentColor: '#10B981',
+  surfaceColor: '#ECFDF5',
+  borderColor: '#A7F3D0',
+})
+const BRANDING_COLOR_PATTERN = /^#?(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 let pool
+
+const normalizeBrandingColor = (value, fallback) => {
+  const normalized = `${value || ''}`.trim()
+
+  if (!normalized) {
+    return fallback
+  }
+
+  const candidate = normalized.startsWith('#') ? normalized : `#${normalized}`
+
+  if (!BRANDING_COLOR_PATTERN.test(candidate)) {
+    return fallback
+  }
+
+  if (candidate.length === 4) {
+    return `#${candidate[1]}${candidate[1]}${candidate[2]}${candidate[2]}${candidate[3]}${candidate[3]}`.toUpperCase()
+  }
+
+  return candidate.toUpperCase()
+}
+
+const getBrandingSettings = (settings = {}) => ({
+  primaryColor: normalizeBrandingColor(settings.primary_color, DEFAULT_BRANDING_COLORS.primaryColor),
+  secondaryColor: normalizeBrandingColor(settings.secondary_color, DEFAULT_BRANDING_COLORS.secondaryColor),
+  accentColor: normalizeBrandingColor(settings.accent_color, DEFAULT_BRANDING_COLORS.accentColor),
+  surfaceColor: normalizeBrandingColor(settings.surface_color, DEFAULT_BRANDING_COLORS.surfaceColor),
+  borderColor: normalizeBrandingColor(settings.border_color, DEFAULT_BRANDING_COLORS.borderColor),
+})
+
+const getPublicBrandingSettings = (settings = {}) => ({
+  siteName: settings.site_name || DEFAULT_SITE_INFO.siteName,
+  siteTagline: settings.site_tagline || DEFAULT_SITE_INFO.siteTagline,
+  siteLogo: settings.site_logo || DEFAULT_SITE_INFO.siteLogo,
+  brandingColors: getBrandingSettings(settings),
+})
+
+const getDefaultSettingEntries = () => [
+  ['site_name', 'general', DEFAULT_SITE_INFO.siteName],
+  ['site_tagline', 'general', DEFAULT_SITE_INFO.siteTagline],
+  ['site_logo', 'general', DEFAULT_SITE_INFO.siteLogo],
+  ['timezone', 'general', DEFAULT_SITE_INFO.timezone],
+  ['date_format', 'general', DEFAULT_SITE_INFO.dateFormat],
+  ['time_format', 'general', DEFAULT_SITE_INFO.timeFormat],
+  ['currency', 'general', DEFAULT_SITE_INFO.currency],
+  ['primary_color', 'branding', DEFAULT_BRANDING_COLORS.primaryColor],
+  ['secondary_color', 'branding', DEFAULT_BRANDING_COLORS.secondaryColor],
+  ['accent_color', 'branding', DEFAULT_BRANDING_COLORS.accentColor],
+  ['surface_color', 'branding', DEFAULT_BRANDING_COLORS.surfaceColor],
+  ['border_color', 'branding', DEFAULT_BRANDING_COLORS.borderColor],
+  ['allow_duplicate_voting', 'voting', 'false'],
+  ['require_vote_confirmation', 'voting', 'true'],
+  ['vote_editing', 'voting', 'true'],
+  ['votes_per_user', 'voting', '10'],
+  ['live_extension_minutes', 'voting', '15'],
+  ['smtp_provider', 'email', 'SendGrid'],
+  ['from_email', 'email', 'no-reply@inboundstar.com'],
+  ['from_name', 'email', DEFAULT_SITE_INFO.siteName],
+  ['version', 'system', 'v2.5.0'],
+  ['last_updated', 'system', 'May 31, 2026 10:15 AM'],
+  ['backup_frequency', 'system', 'Daily'],
+  ['last_backup', 'system', 'June 3, 2026 02:30 AM'],
+  ['next_backup', 'system', 'June 4, 2026 02:30 AM'],
+  ['password_policy', 'security', 'Strong'],
+  ['two_factor_authentication', 'security', 'Enabled'],
+  ['session_timeout', 'security', '30 minutes'],
+  ['login_attempts_limit', 'security', '5 attempts'],
+]
 
 const hashPassword = (password) => crypto.createHash('sha256').update(password).digest('hex')
 const numberFormatter = new Intl.NumberFormat('en-US')
@@ -798,40 +882,13 @@ const seedSettings = async () => {
     return
   }
 
-  const settings = [
-    ['site_name', 'general', 'Inbound Star Voting'],
-    ['site_tagline', 'general', 'Recognize. Appreciate. Celebrate.'],
-    ['site_logo', 'general', ''],
-    ['timezone', 'general', '(UTC+05:30) Asia/Kolkata'],
-    ['date_format', 'general', 'June 3, 2026'],
-    ['time_format', 'general', '12 Hour (hh:mm AM/PM)'],
-    ['currency', 'general', 'USD - US Dollar ($)'],
-    ['allow_duplicate_voting', 'voting', 'false'],
-    ['require_vote_confirmation', 'voting', 'true'],
-    ['vote_editing', 'voting', 'true'],
-    ['votes_per_user', 'voting', '10'],
-    ['live_extension_minutes', 'voting', '15'],
-    ['smtp_provider', 'email', 'SendGrid'],
-    ['from_email', 'email', 'no-reply@inboundstar.com'],
-    ['from_name', 'email', 'Inbound Star Voting'],
-    ['version', 'system', 'v2.5.0'],
-    ['last_updated', 'system', 'May 31, 2026 10:15 AM'],
-    ['backup_frequency', 'system', 'Daily'],
-    ['last_backup', 'system', 'June 3, 2026 02:30 AM'],
-    ['next_backup', 'system', 'June 4, 2026 02:30 AM'],
-    ['password_policy', 'security', 'Strong'],
-    ['two_factor_authentication', 'security', 'Enabled'],
-    ['session_timeout', 'security', '30 minutes'],
-    ['login_attempts_limit', 'security', '5 attempts'],
-  ]
-
   await chunkInsert(
     `
       INSERT INTO app_settings
       (setting_key, setting_group, setting_value)
       VALUES ?
     `,
-    settings,
+    getDefaultSettingEntries(),
   )
 }
 
@@ -912,12 +969,25 @@ const initializeDatabase = async () => {
   await createSchema()
   await seedAdmins()
   await seedSettings()
+  await ensureSettingDefaults(getDefaultSettingEntries())
   await ensureRoundAccessCodes()
 }
 
 const getSettingMap = async () => {
   const rows = await query('SELECT setting_key, setting_value FROM app_settings')
   return Object.fromEntries(rows.map((row) => [row.setting_key, row.setting_value]))
+}
+
+const ensureSettingDefaults = async (entries) => {
+  for (const [settingKey, settingGroup, settingValue] of entries) {
+    await execute(
+      `
+        INSERT IGNORE INTO app_settings (setting_key, setting_group, setting_value)
+        VALUES (?, ?, ?)
+      `,
+      [settingKey, settingGroup, settingValue],
+    )
+  }
 }
 
 const getUniqueRoundAccessCode = async () => {
@@ -1574,13 +1644,24 @@ app.get('/api/admin/meta', async (_req, res) => {
     )
 
     res.json({
-      siteName: settings.site_name || 'Inbound Star Voting',
-      siteTagline: settings.site_tagline || 'Admin Dashboard',
+      siteName: settings.site_name || DEFAULT_SITE_INFO.siteName,
+      siteTagline: settings.site_tagline || DEFAULT_SITE_INFO.siteTagline,
+      siteLogo: settings.site_logo || DEFAULT_SITE_INFO.siteLogo,
+      brandingColors: getBrandingSettings(settings),
       notificationCount: warningRows[0]?.notification_count || 0,
       currentRoundName: activeRound?.name || '',
     })
   } catch (error) {
     res.status(500).json({ message: 'Unable to load admin meta.', error: error.message })
+  }
+})
+
+app.get('/api/public/branding', async (_req, res) => {
+  try {
+    const settings = await getSettingMap()
+    return res.json(getPublicBrandingSettings(settings))
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to load public branding.', error: error.message })
   }
 })
 
@@ -2299,6 +2380,7 @@ app.get('/api/voting/active-round', async (_req, res) => {
 
 app.get('/api/voting/home', async (_req, res) => {
   try {
+    const settings = await getSettingMap()
     const activeRound = await getActiveRound()
     const upcomingRounds = await query(
       `
@@ -2311,6 +2393,7 @@ app.get('/api/voting/home', async (_req, res) => {
     )
 
     return res.json({
+      ...getPublicBrandingSettings(settings),
       liveRound: activeRound
         ? {
             id: activeRound.id,
@@ -2352,9 +2435,7 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
 
       return res.json({
         hasActiveRound: false,
-        siteName: settings.site_name || 'Inbound Star Voting',
-        siteTagline: settings.site_tagline || 'Recognize. Appreciate. Celebrate.',
-        siteLogo: settings.site_logo || '',
+        ...getPublicBrandingSettings(settings),
         round: null,
         categories: [],
         finishedRound: finishedRound
@@ -2401,9 +2482,7 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
 
     return res.json({
       hasActiveRound: true,
-      siteName: settings.site_name || 'Inbound Star Voting',
-      siteTagline: settings.site_tagline || 'Recognize. Appreciate. Celebrate.',
-      siteLogo: settings.site_logo || '',
+      ...getPublicBrandingSettings(settings),
       round: {
         id: activeRound.id,
         name: activeRound.name,
@@ -3379,6 +3458,7 @@ app.get('/api/settings', async (_req, res) => {
         timeFormat: settings.time_format,
         currency: settings.currency,
       },
+      brandingColors: getBrandingSettings(settings),
       votingSettings: {
         allowDuplicateVoting: settings.allow_duplicate_voting === 'true',
         requireVoteConfirmation: settings.require_vote_confirmation === 'true',
@@ -3418,6 +3498,7 @@ app.get('/api/settings', async (_req, res) => {
 
 app.post('/api/settings', async (req, res) => {
   const siteInfo = req.body?.siteInfo || {}
+  const brandingColors = req.body?.brandingColors || {}
   const votingSettings = req.body?.votingSettings || {}
   const emailSettings = req.body?.emailSettings || {}
   let siteLogo = null
@@ -3425,20 +3506,25 @@ app.post('/api/settings', async (req, res) => {
   try {
     siteLogo = sanitizeSiteLogoData(siteInfo.siteLogo)
     await upsertSettingEntries([
-      ['site_name', 'general', siteInfo.siteName || 'Inbound Star Voting'],
-      ['site_tagline', 'general', siteInfo.siteTagline || 'Recognize. Appreciate. Celebrate.'],
+      ['site_name', 'general', siteInfo.siteName || DEFAULT_SITE_INFO.siteName],
+      ['site_tagline', 'general', siteInfo.siteTagline || DEFAULT_SITE_INFO.siteTagline],
       ['site_logo', 'general', siteLogo || ''],
-      ['timezone', 'general', siteInfo.timezone || '(UTC+05:30) Asia/Kolkata'],
-      ['date_format', 'general', siteInfo.dateFormat || 'June 3, 2026'],
-      ['time_format', 'general', siteInfo.timeFormat || '12 Hour (hh:mm AM/PM)'],
-      ['currency', 'general', siteInfo.currency || 'USD - US Dollar ($)'],
+      ['timezone', 'general', siteInfo.timezone || DEFAULT_SITE_INFO.timezone],
+      ['date_format', 'general', siteInfo.dateFormat || DEFAULT_SITE_INFO.dateFormat],
+      ['time_format', 'general', siteInfo.timeFormat || DEFAULT_SITE_INFO.timeFormat],
+      ['currency', 'general', siteInfo.currency || DEFAULT_SITE_INFO.currency],
+      ['primary_color', 'branding', normalizeBrandingColor(brandingColors.primaryColor, DEFAULT_BRANDING_COLORS.primaryColor)],
+      ['secondary_color', 'branding', normalizeBrandingColor(brandingColors.secondaryColor, DEFAULT_BRANDING_COLORS.secondaryColor)],
+      ['accent_color', 'branding', normalizeBrandingColor(brandingColors.accentColor, DEFAULT_BRANDING_COLORS.accentColor)],
+      ['surface_color', 'branding', normalizeBrandingColor(brandingColors.surfaceColor, DEFAULT_BRANDING_COLORS.surfaceColor)],
+      ['border_color', 'branding', normalizeBrandingColor(brandingColors.borderColor, DEFAULT_BRANDING_COLORS.borderColor)],
       ['allow_duplicate_voting', 'voting', `${parseBooleanInput(votingSettings.allowDuplicateVoting)}`],
       ['require_vote_confirmation', 'voting', `${parseBooleanInput(votingSettings.requireVoteConfirmation)}`],
       ['vote_editing', 'voting', `${parseBooleanInput(votingSettings.voteEditing)}`],
       ['votes_per_user', 'voting', `${votingSettings.votesPerUser || 10}`],
       ['live_extension_minutes', 'voting', `${Math.max(1, Number(votingSettings.liveExtensionMinutes || 15))}`],
       ['from_email', 'email', emailSettings.fromEmail || 'no-reply@inboundstar.com'],
-      ['from_name', 'email', emailSettings.fromName || 'Inbound Star Voting'],
+      ['from_name', 'email', emailSettings.fromName || DEFAULT_SITE_INFO.siteName],
       ['smtp_provider', 'email', emailSettings.smtpProvider || 'SendGrid'],
       ['last_updated', 'system', formatDateTime(new Date())],
     ])

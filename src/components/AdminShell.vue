@@ -24,8 +24,9 @@ const router = useRouter()
 const mobileMenuOpen = ref(false)
 const adminSession = ref(getAdminSession())
 const meta = ref({
-  siteName: 'Inbound Star Voting',
-  siteTagline: 'Admin Dashboard',
+  siteName: '',
+  siteTagline: '',
+  siteLogo: '',
   notificationCount: 0,
 })
 
@@ -58,8 +59,9 @@ onMounted(async () => {
     meta.value = await fetchJson('/api/admin/meta')
   } catch {
     meta.value = {
-      siteName: 'Inbound Star Voting',
-      siteTagline: 'Admin Dashboard',
+      siteName: '',
+      siteTagline: '',
+      siteLogo: '',
       notificationCount: 0,
     }
   }
@@ -81,8 +83,14 @@ onMounted(async () => {
       >
         <div class="shrink-0 border-b border-white/10 px-5 py-6">
           <div class="flex items-start gap-3">
-            <div class="rounded-2xl border border-amber-300/30 bg-amber-400/10 p-2">
-              <span class="material-symbols-outlined text-3xl text-amber-400">stars</span>
+            <div class="overflow-hidden rounded-2xl border border-amber-300/30 bg-amber-400/10 p-2">
+              <img
+                v-if="meta.siteLogo"
+                :src="meta.siteLogo"
+                :alt="meta.siteName || 'Website logo'"
+                class="h-10 w-10 rounded-xl object-cover"
+              />
+              <span v-else class="material-symbols-outlined text-3xl text-amber-400">stars</span>
             </div>
             <div>
               <p class="text-xl font-bold">{{ meta.siteName }}</p>

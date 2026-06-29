@@ -5,13 +5,18 @@ import {
   DecodeHintType,
   NotFoundException,
 } from '@zxing/library'
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { postJson } from '../lib/api'
+import { fetchJson, postJson } from '../lib/api'
+import { hexToRgba, resolveBrandingColors } from '../lib/branding'
 
 const router = useRouter()
 const DEV_LOGIN_BADGE = '15357920'
 const DEV_LOGIN_PASSWORD = '21322455'
+const homeSiteLogo = ref('')
+const homeSiteName = ref('')
+const homeSiteTagline = ref('')
+const brandingColors = ref(resolveBrandingColors())
 
 const password = ref('')
 const badgeCode = ref('')
@@ -35,13 +40,29 @@ let lastDetectedBadge = ''
 let lastDetectedAt = 0
 let audioContext = null
 let scannerTuneInterval = null
+const brandingVars = computed(() => {
+  const palette = resolveBrandingColors(brandingColors.value)
+
+  return {
+    '--brand-primary': palette.primaryColor,
+    '--brand-secondary': palette.secondaryColor,
+    '--brand-accent': palette.accentColor,
+    '--brand-surface': palette.surfaceColor,
+    '--brand-border': palette.borderColor,
+    '--brand-primary-soft': hexToRgba(palette.primaryColor, 0.18),
+    '--brand-secondary-soft': hexToRgba(palette.secondaryColor, 0.2),
+    '--brand-accent-soft': hexToRgba(palette.accentColor, 0.14),
+    '--brand-surface-soft': hexToRgba(palette.surfaceColor, 0.95),
+    '--brand-border-soft': hexToRgba(palette.borderColor, 0.68),
+  }
+})
 
 const buildScannerConstraints = () => {
   const baseConstraints = {
-    width: { ideal: 2560, min: 1280 },
-    height: { ideal: 1440, min: 720 },
+    width: { ideal: 3840, min: 1280 },
+    height: { ideal: 2160, min: 720 },
     aspectRatio: { ideal: 1.7777777778 },
-    frameRate: { ideal: 90, min: 30 },
+    frameRate: { ideal: 120, min: 30 },
   }
 
   return selectedCameraId.value
@@ -79,7 +100,7 @@ const optimizeScannerTrack = async () => {
 
   if (typeof capabilities.zoom?.max === 'number' && capabilities.zoom.max > 1) {
     const minZoom = typeof capabilities.zoom.min === 'number' ? capabilities.zoom.min : 1
-    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 1.9)) })
+    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 2.2)) })
   }
 
   if (typeof capabilities.brightness?.max === 'number' && typeof capabilities.brightness?.min === 'number') {
@@ -90,7 +111,25 @@ const optimizeScannerTrack = async () => {
 
   if (typeof capabilities.contrast?.max === 'number' && typeof capabilities.contrast?.min === 'number') {
     advanced.push({
-      contrast: Math.min(capabilities.contrast.max, Math.max(capabilities.contrast.min, 1)),
+      contrast: Math.min(capabilities.contrast.max, Math.max(capabilities.contrast.min, 1.15)),
+    })
+  }
+
+  if (
+    typeof capabilities.exposureCompensation?.max === 'number' &&
+    typeof capabilities.exposureCompensation?.min === 'number'
+  ) {
+    advanced.push({
+      exposureCompensation: Math.min(
+        capabilities.exposureCompensation.max,
+        Math.max(capabilities.exposureCompensation.min, 0.25),
+      ),
+    })
+  }
+
+  if (typeof capabilities.sharpness?.max === 'number' && typeof capabilities.sharpness?.min === 'number') {
+    advanced.push({
+      sharpness: Math.min(capabilities.sharpness.max, Math.max(capabilities.sharpness.min, 40)),
     })
   }
 
@@ -135,6 +174,18 @@ const scannerFormats = [
 const clearMessages = () => {
   errorMessage.value = ''
   successMessage.value = ''
+}
+
+const loadBranding = async () => {
+  try {
+    const response = await fetchJson('/api/public/branding')
+    homeSiteLogo.value = response.siteLogo || ''
+    homeSiteName.value = response.siteName || ''
+    homeSiteTagline.value = response.siteTagline || ''
+    brandingColors.value = resolveBrandingColors(response.brandingColors || {})
+  } catch {
+    // Keep the current palette if branding cannot be loaded.
+  }
 }
 
 const fillDevelopmentLogin = () => {
@@ -258,9 +309,9 @@ const startScanner = async (constraints) => {
   hints.set(DecodeHintType.TRY_HARDER, true)
   hints.set(DecodeHintType.ALSO_INVERTED, true)
 
-  scannerReader = new BrowserMultiFormatReader(hints, 80)
-  scannerReader.timeBetweenDecodingAttempts = 18
-  scannerReader.timeBetweenScansMillis = 18
+  scannerReader = new BrowserMultiFormatReader(hints, 50)
+  scannerReader.timeBetweenDecodingAttempts = 10
+  scannerReader.timeBetweenScansMillis = 10
 
   await scannerReader.decodeFromConstraints(
     {
@@ -309,7 +360,7 @@ const openCamera = async () => {
     await optimizeScannerTrack()
     scannerTuneInterval = window.setInterval(() => {
       optimizeScannerTrack()
-    }, 1200)
+    }, 900)
     await refreshCameraList()
     isCameraOpen.value = true
     scannerMessage.value = 'Camera is ready. Move the barcode across the scanner line. Detection is now optimized for faster reads.'
@@ -408,31 +459,39 @@ const submitLogin = async () => {
   }
 }
 
+onMounted(loadBranding)
+
 onBeforeUnmount(() => {
   stopCamera()
 })
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-100 font-sans text-slate-900">
+  <div class="login-brand-shell min-h-screen font-sans text-slate-900" :style="brandingVars">
     <main class="flex min-h-screen items-center justify-center px-4 py-6 sm:px-6">
-      <div class="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-5 shadow-xl sm:max-w-lg sm:p-7">
+      <div class="login-brand-card w-full max-w-md rounded-[28px] border bg-white/92 p-5 shadow-xl backdrop-blur sm:max-w-lg sm:p-7">
         <div class="flex items-center justify-center gap-3">
           <button
             type="button"
             @click="router.push('/')"
             aria-label="Go to home"
-            class="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 transition hover:bg-blue-100 sm:h-16 sm:w-16"
+            class="login-brand-logo flex h-16 w-16 items-center justify-center rounded-full transition sm:h-[72px] sm:w-[72px]"
           >
-            <span class="material-symbols-outlined text-4xl">shield_lock</span>
+            <img v-if="homeSiteLogo" :src="homeSiteLogo" :alt="homeSiteName || 'Website logo'" class="h-full w-full rounded-full object-cover" />
+            <span v-else class="material-symbols-outlined text-4xl">shield_lock</span>
           </button>
         </div>
 
+        <div v-if="homeSiteName || homeSiteTagline" class="mt-4 text-center">
+          <p v-if="homeSiteName" class="text-xl font-semibold text-slate-900">{{ homeSiteName }}</p>
+          <p v-if="homeSiteTagline" class="mt-1 text-sm text-slate-500">{{ homeSiteTagline }}</p>
+        </div>
+
         <div class="mt-6 space-y-4">
-          <div class="rounded-3xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+          <div class="login-brand-surface rounded-3xl border p-4 sm:p-5">
             <div class="flex overflow-hidden rounded-2xl border border-slate-200 bg-white">
               <div class="flex min-w-0 flex-1 items-center px-4 py-4">
-                <span class="material-symbols-outlined text-xl text-slate-400">badge</span>
+                <span class="material-symbols-outlined login-brand-accent text-xl">badge</span>
                 <input
                   v-model="badgeCode"
                   type="text"
@@ -444,14 +503,14 @@ onBeforeUnmount(() => {
                 type="button"
                 @click="openCamera"
                 :disabled="isCameraLoading"
-                class="inline-flex h-[58px] w-16 shrink-0 items-center justify-center bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                class="login-brand-action inline-flex h-[58px] w-16 shrink-0 items-center justify-center text-white transition disabled:cursor-not-allowed"
               >
                 <span class="material-symbols-outlined text-lg">barcode_scanner</span>
               </button>
             </div>
 
             <label class="mt-4 flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-4">
-              <span class="material-symbols-outlined text-xl text-slate-400">lock</span>
+              <span class="material-symbols-outlined login-brand-accent text-xl">lock</span>
               <input
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
@@ -483,7 +542,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 @click="fillDevelopmentLogin"
-                class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-base font-medium text-slate-700 transition hover:bg-slate-100"
+                class="login-brand-outline inline-flex w-full items-center justify-center gap-2 rounded-2xl border bg-white px-5 py-4 text-base font-medium text-slate-700 transition"
               >
                 <span class="material-symbols-outlined text-xl">bolt</span>
                 Quick Login
@@ -493,7 +552,7 @@ onBeforeUnmount(() => {
                 type="button"
                 @click="submitLogin"
                 :disabled="isSubmitting || isVerifyingBadge"
-                class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-base font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                class="login-brand-action inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 text-base font-medium text-white transition disabled:cursor-not-allowed"
               >
                 <span class="material-symbols-outlined text-xl">login</span>
                 {{ isSubmitting ? 'Signing In...' : isVerifyingBadge ? 'Checking...' : 'Continue' }}
@@ -522,8 +581,8 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="mt-4 rounded-3xl border border-dashed border-blue-200 bg-slate-50 p-3">
-          <div class="relative overflow-hidden rounded-[24px] border-2 border-dashed border-blue-200 bg-slate-950">
+        <div class="login-brand-scanner-shell mt-4 rounded-3xl border border-dashed p-3">
+          <div class="login-brand-scanner-frame relative overflow-hidden rounded-[24px] border-2 border-dashed bg-slate-950">
             <video
               ref="videoRef"
               autoplay
@@ -536,18 +595,16 @@ onBeforeUnmount(() => {
               v-if="!isCameraOpen"
               class="absolute inset-0 flex items-center justify-center bg-slate-950/95"
             >
-              <span class="material-symbols-outlined text-5xl text-blue-300">barcode_scanner</span>
+              <span class="material-symbols-outlined login-brand-accent text-5xl">barcode_scanner</span>
             </div>
 
             <div class="pointer-events-none absolute inset-0">
-              <div class="absolute inset-x-4 top-1/2 h-20 -translate-y-1/2 rounded-3xl border border-white/30 bg-white/5 sm:inset-x-5"></div>
-              <div class="absolute left-6 top-1/2 h-6 w-6 -translate-y-10 border-l-4 border-t-4 border-blue-500"></div>
-              <div class="absolute right-6 top-1/2 h-6 w-6 -translate-y-10 border-r-4 border-t-4 border-blue-500"></div>
-              <div class="absolute left-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-l-4 border-blue-500"></div>
-              <div class="absolute right-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-r-4 border-blue-500"></div>
-              <div
-                class="absolute inset-x-6 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-blue-400 to-transparent sm:inset-x-7"
-              ></div>
+              <div class="login-brand-guide absolute inset-x-0 top-1/2 h-20 -translate-y-1/2 rounded-3xl border bg-white/5"></div>
+              <div class="login-brand-corner absolute left-3 top-1/2 h-6 w-6 -translate-y-10 border-l-4 border-t-4"></div>
+              <div class="login-brand-corner absolute right-3 top-1/2 h-6 w-6 -translate-y-10 border-r-4 border-t-4"></div>
+              <div class="login-brand-corner absolute left-3 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-l-4"></div>
+              <div class="login-brand-corner absolute right-3 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-r-4"></div>
+              <div class="login-brand-scan-line absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full"></div>
             </div>
           </div>
 
@@ -558,7 +615,7 @@ onBeforeUnmount(() => {
               type="button"
               @click="switchCamera"
               :disabled="!canFlipCamera || isCameraLoading"
-              class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+              class="login-brand-outline inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium text-slate-700 transition disabled:cursor-not-allowed disabled:text-slate-300"
             >
               <span class="material-symbols-outlined text-lg">flip_camera_android</span>
               Flip Camera
@@ -567,7 +624,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               @click="closeCameraModal"
-              class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              class="login-brand-outline inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium text-slate-700 transition"
             >
               <span class="material-symbols-outlined text-lg">videocam_off</span>
               Close
@@ -578,3 +635,73 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.login-brand-shell {
+  background:
+    radial-gradient(circle at top, var(--brand-primary-soft), transparent 32%),
+    radial-gradient(circle at bottom right, var(--brand-secondary-soft), transparent 28%),
+    linear-gradient(180deg, #f8fafc 0%, #eefbf6 42%, #f8fafc 100%);
+}
+
+.login-brand-card {
+  border-color: var(--brand-border-soft);
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.12);
+}
+
+.login-brand-logo {
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+  color: #ffffff;
+  box-shadow: 0 18px 42px var(--brand-primary-soft);
+}
+
+.login-brand-surface {
+  border-color: var(--brand-border-soft);
+  background: linear-gradient(180deg, var(--brand-surface-soft), rgba(255, 255, 255, 0.98));
+}
+
+.login-brand-action {
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+  box-shadow: 0 16px 34px var(--brand-primary-soft);
+}
+
+.login-brand-action:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+
+.login-brand-action:disabled {
+  box-shadow: none;
+  opacity: 0.72;
+}
+
+.login-brand-outline {
+  border-color: var(--brand-border-soft);
+}
+
+.login-brand-outline:hover:not(:disabled) {
+  background-color: var(--brand-accent-soft);
+  border-color: var(--brand-border);
+}
+
+.login-brand-accent {
+  color: var(--brand-accent);
+}
+
+.login-brand-scanner-shell,
+.login-brand-scanner-frame {
+  border-color: var(--brand-border-soft);
+}
+
+.login-brand-guide {
+  border-color: rgba(255, 255, 255, 0.36);
+}
+
+.login-brand-corner {
+  border-color: var(--brand-accent);
+}
+
+.login-brand-scan-line {
+  background: linear-gradient(90deg, transparent, var(--brand-accent), transparent);
+  box-shadow: 0 0 28px var(--brand-accent-soft);
+}
+</style>

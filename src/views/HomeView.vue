@@ -4,10 +4,14 @@ import { useRouter } from 'vue-router'
 import { fetchJson } from '../lib/api'
 
 const router = useRouter()
+const homeSiteLogo = ref('')
+const homeSiteName = ref('')
+const homeSiteTagline = ref('')
 const liveRound = ref(null)
 const upcomingRounds = ref([])
 const pageError = ref('')
 const isLoading = ref(true)
+const copyrightYear = computed(() => new Date().getFullYear())
 
 const formatDateRange = (startDate, endDate) => {
   if (!startDate || !endDate) {
@@ -55,6 +59,9 @@ const loadVotingHome = async () => {
 
   try {
     const response = await fetchJson('/api/voting/home')
+    homeSiteLogo.value = response.siteLogo || ''
+    homeSiteName.value = response.siteName || ''
+    homeSiteTagline.value = response.siteTagline || ''
     liveRound.value = response.liveRound || null
     upcomingRounds.value = response.upcomingRounds || []
   } catch (error) {
@@ -77,12 +84,18 @@ onMounted(loadVotingHome)
     <main class="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
       <header class="flex flex-wrap items-center justify-between gap-4">
         <div class="flex items-center gap-3">
-          <div class="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-emerald-300 backdrop-blur">
-            <span class="material-symbols-outlined text-4xl">how_to_vote</span>
+          <div class="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-white/10 text-emerald-300 backdrop-blur">
+            <img
+              v-if="homeSiteLogo"
+              :src="homeSiteLogo"
+              :alt="homeSiteName || 'Website logo'"
+              class="h-full w-full object-cover"
+            />
+            <span v-else class="material-symbols-outlined text-4xl">how_to_vote</span>
           </div>
           <div>
-            <p class="text-2xl font-semibold">Inbound Star Voting</p>
-            <p class="text-sm text-slate-300">Recognize excellence through the current live round and upcoming schedules.</p>
+            <p class="text-2xl font-semibold">{{ homeSiteName }}</p>
+            <p class="text-sm text-slate-300">{{ homeSiteTagline }}</p>
           </div>
         </div>
 
@@ -212,7 +225,7 @@ onMounted(loadVotingHome)
       </section>
 
       <footer class="mt-10 text-center text-xs text-slate-400">
-        © 2026 Inbound Star Voting. All rights reserved.
+        © {{ copyrightYear }} <span v-if="homeSiteName">{{ homeSiteName }}. </span>All rights reserved.
       </footer>
     </main>
   </div>

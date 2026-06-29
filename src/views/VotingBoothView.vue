@@ -8,11 +8,13 @@ import {
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
+import { hexToRgba, resolveBrandingColors } from '../lib/branding'
 
 const router = useRouter()
 const homeSiteLogo = ref('')
-const homeSiteName = ref('Inbound Star Voting')
-const homeSiteTagline = ref('Recognize. Appreciate. Celebrate.')
+const homeSiteName = ref('')
+const homeSiteTagline = ref('')
+const brandingColors = ref(resolveBrandingColors())
 const roundSummary = ref(null)
 const finishedRoundSummary = ref(null)
 const publicCategories = ref([])
@@ -32,6 +34,7 @@ const isMobileMenuOpen = ref(false)
 const isPreparingVote = ref(false)
 const isSubmitting = ref(false)
 const isCameraModalOpen = ref(false)
+const isMobileTipsModalOpen = ref(false)
 const isCameraOpen = ref(false)
 const isCameraLoading = ref(false)
 const cameraMode = ref('environment')
@@ -50,13 +53,29 @@ let roundRefreshInterval = null
 let toastTimeout = null
 let hasReloadedAfterCountdown = false
 let scannerTuneInterval = null
+const brandingVars = computed(() => {
+  const palette = resolveBrandingColors(brandingColors.value)
+
+  return {
+    '--brand-primary': palette.primaryColor,
+    '--brand-secondary': palette.secondaryColor,
+    '--brand-accent': palette.accentColor,
+    '--brand-surface': palette.surfaceColor,
+    '--brand-border': palette.borderColor,
+    '--brand-primary-soft': hexToRgba(palette.primaryColor, 0.18),
+    '--brand-secondary-soft': hexToRgba(palette.secondaryColor, 0.18),
+    '--brand-accent-soft': hexToRgba(palette.accentColor, 0.14),
+    '--brand-surface-soft': hexToRgba(palette.surfaceColor, 0.92),
+    '--brand-border-soft': hexToRgba(palette.borderColor, 0.7),
+  }
+})
 
 const buildScannerConstraints = () => {
   const baseConstraints = {
-    width: { ideal: 2560, min: 1280 },
-    height: { ideal: 1440, min: 720 },
+    width: { ideal: 3840, min: 1280 },
+    height: { ideal: 2160, min: 720 },
     aspectRatio: { ideal: 1.7777777778 },
-    frameRate: { ideal: 90, min: 30 },
+    frameRate: { ideal: 120, min: 30 },
   }
 
   return selectedCameraId.value
@@ -94,7 +113,7 @@ const optimizeScannerTrack = async () => {
 
   if (typeof capabilities.zoom?.max === 'number' && capabilities.zoom.max > 1) {
     const minZoom = typeof capabilities.zoom.min === 'number' ? capabilities.zoom.min : 1
-    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 1.9)) })
+    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 2.2)) })
   }
 
   if (typeof capabilities.brightness?.max === 'number' && typeof capabilities.brightness?.min === 'number') {
@@ -105,7 +124,25 @@ const optimizeScannerTrack = async () => {
 
   if (typeof capabilities.contrast?.max === 'number' && typeof capabilities.contrast?.min === 'number') {
     advanced.push({
-      contrast: Math.min(capabilities.contrast.max, Math.max(capabilities.contrast.min, 1)),
+      contrast: Math.min(capabilities.contrast.max, Math.max(capabilities.contrast.min, 1.15)),
+    })
+  }
+
+  if (
+    typeof capabilities.exposureCompensation?.max === 'number' &&
+    typeof capabilities.exposureCompensation?.min === 'number'
+  ) {
+    advanced.push({
+      exposureCompensation: Math.min(
+        capabilities.exposureCompensation.max,
+        Math.max(capabilities.exposureCompensation.min, 0.25),
+      ),
+    })
+  }
+
+  if (typeof capabilities.sharpness?.max === 'number' && typeof capabilities.sharpness?.min === 'number') {
+    advanced.push({
+      sharpness: Math.min(capabilities.sharpness.max, Math.max(capabilities.sharpness.min, 40)),
     })
   }
 
@@ -214,6 +251,28 @@ const countdownLabel = computed(() => {
   ]
 
   return parts.join(' : ')
+})
+const countdownDisplayParts = computed(() => {
+  if (!countdownParts.value || isFinishedRoundState.value || countdownParts.value.isEnded) {
+    return []
+  }
+
+  const units = [
+    { key: 'days', label: 'd', value: countdownParts.value.days },
+    { key: 'hours', label: 'h', value: countdownParts.value.hours },
+    { key: 'minutes', label: 'm', value: countdownParts.value.minutes },
+    { key: 'seconds', label: 's', value: countdownParts.value.seconds },
+  ]
+  const visibleUnits = units.filter((unit) => unit.value > 0)
+
+  return visibleUnits.length ? visibleUnits : [{ key: 'seconds', label: 's', value: 0 }]
+})
+const countdownStateLabel = computed(() => {
+  if (!countdownParts.value) {
+    return 'Voting period not available'
+  }
+
+  return isFinishedRoundState.value || countdownParts.value.isEnded ? 'Voting period ended' : ''
 })
 const copyrightYear = computed(() => new Date().getFullYear())
 const nomineeCards = computed(() => {
@@ -358,8 +417,9 @@ const loadPublicVotingPage = async () => {
   try {
     const response = await fetchJson('/api/voting/live-ballot')
     homeSiteLogo.value = response.siteLogo || ''
-    homeSiteName.value = response.siteName || 'Inbound Star Voting'
-    homeSiteTagline.value = response.siteTagline || 'Recognize. Appreciate. Celebrate.'
+    homeSiteName.value = response.siteName || ''
+    homeSiteTagline.value = response.siteTagline || ''
+    brandingColors.value = resolveBrandingColors(response.brandingColors || {})
 
     if (!response.hasActiveRound || !response.round) {
       roundSummary.value = null
@@ -373,8 +433,8 @@ const loadPublicVotingPage = async () => {
     publicCategories.value = response.categories || []
   } catch (error) {
     homeSiteLogo.value = ''
-    homeSiteName.value = 'Inbound Star Voting'
-    homeSiteTagline.value = 'Recognize. Appreciate. Celebrate.'
+    homeSiteName.value = ''
+    homeSiteTagline.value = ''
     roundSummary.value = null
     finishedRoundSummary.value = null
     publicCategories.value = []
@@ -549,9 +609,9 @@ const startScanner = async (constraints) => {
   hints.set(DecodeHintType.TRY_HARDER, true)
   hints.set(DecodeHintType.ALSO_INVERTED, true)
 
-  scannerReader = new BrowserMultiFormatReader(hints, 80)
-  scannerReader.timeBetweenDecodingAttempts = 18
-  scannerReader.timeBetweenScansMillis = 18
+  scannerReader = new BrowserMultiFormatReader(hints, 50)
+  scannerReader.timeBetweenDecodingAttempts = 10
+  scannerReader.timeBetweenScansMillis = 10
 
   await scannerReader.decodeFromConstraints(
     {
@@ -600,7 +660,7 @@ const openCamera = async () => {
     await optimizeScannerTrack()
     scannerTuneInterval = window.setInterval(() => {
       optimizeScannerTrack()
-    }, 1200)
+    }, 900)
     await refreshCameraList()
     isCameraOpen.value = true
     scannerMessage.value = 'Camera is ready. Move the badge across the scanner line. Detection is now optimized for faster reads.'
@@ -718,18 +778,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.18),_transparent_30%),linear-gradient(180deg,_#effdf5_0%,_#f8fafc_38%,_#ecfeff_100%)] font-sans text-slate-900">
+  <div class="public-brand-shell relative min-h-screen overflow-hidden font-sans text-slate-900" :style="brandingVars">
     <div class="pointer-events-none absolute inset-0">
       <div class="absolute -left-16 top-16 h-56 w-56 rounded-full bg-emerald-200/35 blur-3xl"></div>
       <div class="absolute right-0 top-0 h-72 w-72 rounded-full bg-cyan-200/30 blur-3xl"></div>
       <div class="absolute bottom-10 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-blue-200/20 blur-3xl"></div>
     </div>
 
-    <div class="fixed inset-x-0 top-0 z-40 border-b border-white/60 bg-white/78 backdrop-blur">
+    <div class="public-brand-header fixed inset-x-0 top-0 z-40 border-b backdrop-blur">
       <div class="mx-auto w-full max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
         <div class="flex items-center justify-between gap-3">
           <div class="flex min-w-0 items-center gap-3 sm:gap-4">
-            <div class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/90 text-emerald-600 shadow-lg shadow-emerald-100/70 ring-1 ring-white/70 backdrop-blur sm:h-14 sm:w-14">
+            <div class="public-brand-logo flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-lg backdrop-blur sm:h-14 sm:w-14">
               <img
                 v-if="homeSiteLogo"
                 :src="homeSiteLogo"
@@ -747,7 +807,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             @click="isMobileMenuOpen = !isMobileMenuOpen"
-            class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/70 bg-white/85 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white sm:hidden"
+            class="public-brand-outline inline-flex h-11 w-11 items-center justify-center rounded-xl border bg-white/85 text-slate-600 shadow-sm backdrop-blur transition sm:hidden"
             :aria-expanded="isMobileMenuOpen"
             aria-label="Toggle menu"
           >
@@ -757,18 +817,18 @@ onBeforeUnmount(() => {
           <button
             type="button"
             @click="navigateToLogin"
-            class="hidden h-11 items-center justify-center gap-2 rounded-xl border border-white/70 bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition hover:bg-white sm:inline-flex"
+            class="public-brand-outline hidden h-11 items-center justify-center gap-2 rounded-xl border bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition sm:inline-flex"
           >
             <span class="material-symbols-outlined text-base">admin_panel_settings</span>
             Login
           </button>
         </div>
 
-        <div v-if="isMobileMenuOpen" class="mt-3 rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm sm:hidden">
+        <div v-if="isMobileMenuOpen" class="mt-3 rounded-2xl border bg-white/90 p-3 shadow-sm sm:hidden public-brand-outline">
           <button
             type="button"
             @click="navigateToLogin"
-            class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-600 transition hover:bg-slate-50"
+            class="public-brand-outline inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm text-slate-600 transition"
           >
             <span class="material-symbols-outlined text-base">admin_panel_settings</span>
             Login
@@ -780,21 +840,21 @@ onBeforeUnmount(() => {
     <main class="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 pb-4 pt-24 sm:px-6 sm:pt-28 lg:px-8">
       <section class="mt-4 overflow-hidden rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur sm:mt-6 sm:rounded-[36px] sm:p-8">
         <div class="grid gap-6 lg:grid-cols-[1.5fr_0.9fr]">
-          <div class="relative overflow-hidden rounded-[32px] bg-[linear-gradient(135deg,_rgba(5,150,105,0.96),_rgba(14,165,233,0.92))] px-6 py-7 text-white shadow-[0_18px_50px_rgba(16,185,129,0.28)] sm:px-8">
+          <div class="public-brand-hero relative overflow-hidden rounded-[32px] px-5 py-6 text-white sm:px-8 sm:py-7">
             <div class="absolute right-[-48px] top-[-48px] h-40 w-40 rounded-full border border-white/15 bg-white/10"></div>
             <div class="absolute bottom-[-64px] left-[-32px] h-44 w-44 rounded-full border border-white/10 bg-white/10"></div>
             <div class="relative">
-              <p class="text-sm font-semibold uppercase tracking-[0.22em] text-emerald-100">{{ heroEyebrowLabel }}</p>
-              <p class="mt-3 text-3xl font-semibold leading-tight sm:text-4xl">{{ heroTitle }}</p>
-              <p class="mt-4 max-w-2xl text-sm text-emerald-50/90 sm:text-base">
+              <p class="public-brand-eyebrow text-xs font-semibold uppercase tracking-[0.22em] sm:text-sm">{{ heroEyebrowLabel }}</p>
+              <p class="mt-3 text-2xl font-semibold leading-tight sm:text-4xl">{{ heroTitle }}</p>
+              <p class="mt-3 max-w-2xl text-xs text-white/90 sm:mt-4 sm:text-base">
                 {{ heroDescription }}
               </p>
-              <div class="mt-6 flex flex-wrap gap-3">
-                <div class="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm text-white/95 ring-1 ring-white/15">
+              <div class="mt-5 grid grid-cols-2 gap-3 sm:mt-6 sm:flex sm:flex-wrap">
+                <div class="inline-flex w-full items-center gap-2 rounded-full bg-white/15 px-3 py-2 text-xs text-white/95 ring-1 ring-white/15 sm:w-auto sm:px-4 sm:text-sm">
                   <span class="material-symbols-outlined text-base">calendar_month</span>
                   {{ formatDateRange(displayRound?.startDate, displayRound?.endDate) || 'Schedule not available' }}
                 </div>
-                <div class="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm text-white/95 ring-1 ring-white/15">
+                <div class="inline-flex w-full items-center gap-2 rounded-full bg-white/15 px-3 py-2 text-xs text-white/95 ring-1 ring-white/15 sm:w-auto sm:px-4 sm:text-sm">
                   <span class="material-symbols-outlined text-base">verified_user</span>
                   One vote per associate
                 </div>
@@ -802,15 +862,40 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="rounded-[32px] border border-emerald-100 bg-[linear-gradient(180deg,_rgba(236,253,245,0.95),_rgba(255,255,255,0.98))] p-6 shadow-[0_14px_40px_rgba(16,185,129,0.08)]">
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Voting Timer</p>
-            <p class="mt-3 text-3xl font-semibold leading-tight text-slate-900">{{ countdownLabel }}</p>
+          <div class="public-brand-timer rounded-[32px] border p-5 shadow-[0_14px_40px_rgba(16,185,129,0.08)] sm:p-6">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] public-brand-accent-text">Voting Timer</p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <template v-if="countdownDisplayParts.length">
+                <div
+                  v-for="segment in countdownDisplayParts"
+                  :key="segment.key"
+                  class="public-brand-countdown-chip inline-flex items-center rounded-2xl border px-3 py-2 text-lg font-semibold text-slate-900 sm:text-xl"
+                >
+                  {{ segment.value }}{{ segment.label }}
+                </div>
+              </template>
+              <div
+                v-else
+                class="public-brand-countdown-chip inline-flex items-center rounded-2xl border px-3 py-2 text-sm font-semibold text-slate-700"
+              >
+                {{ countdownStateLabel }}
+              </div>
+            </div>
             <p class="mt-2 text-sm text-slate-500">
               <span v-if="isLoadingRound">Loading live voting page...</span>
               <span v-else>{{ displayRound?.name || 'No live voting round' }}</span>
             </p>
 
-            <div class="mt-6 grid gap-3">
+            <button
+              type="button"
+              @click="isMobileTipsModalOpen = true"
+              class="public-brand-outline mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border bg-white/90 px-4 text-sm font-medium text-slate-700 transition sm:hidden"
+            >
+              <span class="material-symbols-outlined text-base">info</span>
+              How It Works & Scanner Tips
+            </button>
+
+            <div class="mt-6 hidden gap-3 sm:grid">
               <div class="rounded-2xl border border-white/80 bg-white/85 px-4 py-4 shadow-sm">
                 <p class="text-sm font-semibold text-slate-900">How It Works</p>
                 <p class="mt-1 text-sm text-slate-500">Choose a nominee card, scan your badge, then confirm your vote.</p>
@@ -938,9 +1023,9 @@ onBeforeUnmount(() => {
           <article
             v-for="card in nomineeCards"
             :key="card.key"
-            class="rounded-[28px] border border-slate-200/90 bg-[linear-gradient(180deg,_rgba(255,255,255,1),_rgba(248,250,252,0.98))] p-5 text-center shadow-sm transition hover:-translate-y-1 hover:border-emerald-300 hover:shadow-[0_18px_45px_rgba(16,185,129,0.12)]"
+            class="public-brand-card rounded-[28px] border p-5 text-center shadow-sm transition hover:-translate-y-1"
           >
-            <div class="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-emerald-700 ring-8 ring-emerald-50">
+            <div class="public-brand-avatar mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full ring-8">
               <img
                 v-if="card.photoData"
                 :src="card.photoData"
@@ -951,7 +1036,7 @@ onBeforeUnmount(() => {
             </div>
 
             <p class="mt-5 text-xl font-semibold text-slate-900">{{ card.fullName }}</p>
-            <div class="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600">
+            <div class="public-brand-category mt-3 inline-flex rounded-full px-3 py-1 text-xs font-semibold">
               {{ card.categoryName }}
             </div>
             <p class="mt-3 text-xs text-slate-400">{{ card.departmentName }} / {{ card.roleName }}</p>
@@ -959,7 +1044,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               @click="startVoteFlow(card)"
-              class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-700"
+              class="public-brand-action mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition"
             >
               <span class="material-symbols-outlined text-base">qr_code_scanner</span>
               Vote
@@ -1039,7 +1124,7 @@ onBeforeUnmount(() => {
                 type="button"
                 @click="confirmVote"
                 :disabled="isSubmitting || isPreparingVote"
-                class="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                class="public-brand-action inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <span class="material-symbols-outlined text-base">how_to_vote</span>
                 {{ isSubmitting ? 'Submitting...' : 'Confirm Vote' }}
@@ -1056,8 +1141,8 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-else class="mt-4 rounded-3xl border border-dashed border-emerald-200 bg-slate-50 p-3">
-          <div class="relative overflow-hidden rounded-[24px] border-2 border-dashed border-emerald-200 bg-slate-950">
+        <div v-else class="public-brand-scanner-shell mt-4 rounded-3xl border border-dashed bg-slate-50 p-3">
+          <div class="public-brand-scanner-frame relative overflow-hidden rounded-[24px] border-2 border-dashed bg-slate-950">
             <video
               ref="videoRef"
               autoplay
@@ -1070,18 +1155,16 @@ onBeforeUnmount(() => {
               v-if="!isCameraOpen"
               class="absolute inset-0 flex items-center justify-center bg-slate-950/95"
             >
-              <span class="material-symbols-outlined text-5xl text-emerald-300">barcode_scanner</span>
+              <span class="material-symbols-outlined public-brand-accent text-5xl">barcode_scanner</span>
             </div>
 
             <div class="pointer-events-none absolute inset-0">
-              <div class="absolute inset-x-4 top-1/2 h-20 -translate-y-1/2 rounded-3xl border border-white/30 bg-white/5 sm:inset-x-5"></div>
-              <div class="absolute left-6 top-1/2 h-6 w-6 -translate-y-10 border-l-4 border-t-4 border-emerald-500"></div>
-              <div class="absolute right-6 top-1/2 h-6 w-6 -translate-y-10 border-r-4 border-t-4 border-emerald-500"></div>
-              <div class="absolute left-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-l-4 border-emerald-500"></div>
-              <div class="absolute right-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-r-4 border-emerald-500"></div>
-              <div
-                class="absolute inset-x-6 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-emerald-400 to-transparent sm:inset-x-7"
-              ></div>
+              <div class="public-brand-guide absolute inset-x-0 top-1/2 h-20 -translate-y-1/2 rounded-3xl border bg-white/5"></div>
+              <div class="public-brand-corner absolute left-3 top-1/2 h-6 w-6 -translate-y-10 border-l-4 border-t-4"></div>
+              <div class="public-brand-corner absolute right-3 top-1/2 h-6 w-6 -translate-y-10 border-r-4 border-t-4"></div>
+              <div class="public-brand-corner absolute left-3 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-l-4"></div>
+              <div class="public-brand-corner absolute right-3 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-r-4"></div>
+              <div class="public-brand-scan-line absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full"></div>
             </div>
           </div>
 
@@ -1102,7 +1185,7 @@ onBeforeUnmount(() => {
               type="button"
               @click="prepareBadgeForVote"
               :disabled="isPreparingVote || isSubmitting"
-              class="inline-flex h-[58px] shrink-0 items-center justify-center bg-emerald-600 px-5 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+              class="public-brand-action inline-flex h-[58px] shrink-0 items-center justify-center px-5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-70"
             >
               {{ isPreparingVote ? 'Checking...' : 'Check' }}
             </button>
@@ -1113,7 +1196,7 @@ onBeforeUnmount(() => {
               type="button"
               @click="switchCamera"
               :disabled="!canFlipCamera || isCameraLoading"
-              class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+              class="public-brand-outline inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium text-slate-700 transition disabled:cursor-not-allowed disabled:text-slate-300"
             >
               <span class="material-symbols-outlined text-lg">flip_camera_android</span>
               Flip Camera
@@ -1122,11 +1205,43 @@ onBeforeUnmount(() => {
             <button
               type="button"
               @click="cancelVoteFlow"
-              class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              class="public-brand-outline inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium text-slate-700 transition"
             >
               <span class="material-symbols-outlined text-lg">videocam_off</span>
               Close
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="isMobileTipsModalOpen"
+      class="fixed inset-0 z-[60] flex items-end bg-slate-950/70 px-4 py-6 backdrop-blur-sm sm:hidden"
+    >
+      <div class="w-full rounded-[28px] bg-white p-5 shadow-2xl">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-lg font-semibold text-slate-900">How It Works</p>
+            <p class="mt-1 text-sm text-slate-500">Quick steps and scanner tips for stronger badge detection on mobile.</p>
+          </div>
+          <button
+            type="button"
+            @click="isMobileTipsModalOpen = false"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div class="mt-5 grid gap-3">
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <p class="text-sm font-semibold text-slate-900">How It Works</p>
+            <p class="mt-1 text-sm text-slate-500">Choose a nominee card, scan your badge, then confirm your vote.</p>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <p class="text-sm font-semibold text-slate-900">Scanner Tip</p>
+            <p class="mt-1 text-sm text-slate-500">Keep the barcode moving across the center line and let the full-width scanner guide fill the camera frame.</p>
           </div>
         </div>
       </div>
@@ -1161,7 +1276,109 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="relative z-10 border-t border-white/60 bg-white/55 px-4 py-4 text-center text-sm text-slate-500 backdrop-blur sm:px-6 lg:px-8">
-      Copyright © {{ copyrightYear }} {{ homeSiteName }}. All rights reserved.
+      Copyright © {{ copyrightYear }} <span v-if="homeSiteName">{{ homeSiteName }}. </span>All rights reserved.
     </footer>
   </div>
 </template>
+
+<style scoped>
+.public-brand-shell {
+  background:
+    radial-gradient(circle at top, var(--brand-primary-soft), transparent 30%),
+    linear-gradient(180deg, #effdf5 0%, #f8fafc 38%, #ecfeff 100%);
+}
+
+.public-brand-header {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: var(--brand-border-soft);
+}
+
+.public-brand-logo {
+  color: var(--brand-accent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), var(--brand-surface-soft));
+  box-shadow: 0 18px 40px var(--brand-primary-soft);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.public-brand-hero {
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+  box-shadow: 0 18px 50px var(--brand-primary-soft);
+}
+
+.public-brand-eyebrow {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.public-brand-timer {
+  background: linear-gradient(180deg, var(--brand-surface-soft), rgba(255, 255, 255, 0.98));
+  border-color: var(--brand-border-soft);
+}
+
+.public-brand-countdown-chip {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: var(--brand-border-soft);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+}
+
+.public-brand-card {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(248, 250, 252, 0.98));
+}
+
+.public-brand-card:hover {
+  border-color: var(--brand-border);
+  box-shadow: 0 18px 45px var(--brand-primary-soft);
+}
+
+.public-brand-avatar {
+  background: var(--brand-surface);
+  color: var(--brand-primary);
+  --tw-ring-color: var(--brand-surface);
+}
+
+.public-brand-category {
+  background: var(--brand-surface);
+  color: var(--brand-primary);
+}
+
+.public-brand-action {
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+  box-shadow: 0 14px 32px var(--brand-primary-soft);
+}
+
+.public-brand-action:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+
+.public-brand-outline {
+  border-color: var(--brand-border-soft);
+}
+
+.public-brand-outline:hover:not(:disabled) {
+  background-color: var(--brand-accent-soft);
+  border-color: var(--brand-border);
+}
+
+.public-brand-accent,
+.public-brand-accent-text {
+  color: var(--brand-accent);
+}
+
+.public-brand-scanner-shell,
+.public-brand-scanner-frame {
+  border-color: var(--brand-border-soft);
+}
+
+.public-brand-guide {
+  border-color: rgba(255, 255, 255, 0.36);
+}
+
+.public-brand-corner {
+  border-color: var(--brand-accent);
+}
+
+.public-brand-scan-line {
+  background: linear-gradient(90deg, transparent, var(--brand-accent), transparent);
+  box-shadow: 0 0 30px var(--brand-accent-soft);
+}
+</style>
