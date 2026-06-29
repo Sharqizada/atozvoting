@@ -29,6 +29,12 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'voting_system',
 }
+const allowedCorsOrigins = (
+  process.env.CORS_ORIGINS || 'https://atozvote.cloud,https://www.atozvote.cloud'
+)
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
 
 let pool
 
@@ -328,6 +334,11 @@ app.use(
       }
 
       if (/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+        callback(null, true)
+        return
+      }
+
+      if (allowedCorsOrigins.includes(origin)) {
         callback(null, true)
         return
       }

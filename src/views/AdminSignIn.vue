@@ -35,6 +35,62 @@ let lastDetectedBadge = ''
 let lastDetectedAt = 0
 let audioContext = null
 
+const buildScannerConstraints = () => {
+  const baseConstraints = {
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: 60, min: 24 },
+  }
+
+  return selectedCameraId.value
+    ? {
+        ...baseConstraints,
+        deviceId: { exact: selectedCameraId.value },
+      }
+    : {
+        ...baseConstraints,
+        facingMode: { ideal: cameraMode.value },
+      }
+}
+
+const optimizeScannerTrack = async () => {
+  const track = videoRef.value?.srcObject?.getVideoTracks?.()[0]
+
+  if (!track || typeof track.getCapabilities !== 'function' || typeof track.applyConstraints !== 'function') {
+    return
+  }
+
+  const capabilities = track.getCapabilities()
+  const advanced = []
+
+  if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
+    advanced.push({ focusMode: 'continuous' })
+  }
+
+  if (Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes('continuous')) {
+    advanced.push({ exposureMode: 'continuous' })
+  }
+
+  if (Array.isArray(capabilities.whiteBalanceMode) && capabilities.whiteBalanceMode.includes('continuous')) {
+    advanced.push({ whiteBalanceMode: 'continuous' })
+  }
+
+  if (typeof capabilities.zoom?.max === 'number' && capabilities.zoom.max > 1) {
+    const minZoom = typeof capabilities.zoom.min === 'number' ? capabilities.zoom.min : 1
+    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 1.4)) })
+  }
+
+  if (!advanced.length) {
+    return
+  }
+
+  try {
+    await track.applyConstraints({ advanced })
+  } catch {
+    // Ignore unsupported camera tuning constraints.
+  }
+}
+
 const canFlipCamera = computed(
   () => availableCameras.value.length > 1 || isCameraOpen.value || isCameraModalOpen.value,
 )
@@ -178,8 +234,8 @@ const startScanner = async (constraints) => {
   hints.set(DecodeHintType.POSSIBLE_FORMATS, scannerFormats)
   hints.set(DecodeHintType.TRY_HARDER, true)
 
-  scannerReader = new BrowserMultiFormatReader(hints, 200)
-  scannerReader.timeBetweenDecodingAttempts = 90
+  scannerReader = new BrowserMultiFormatReader(hints, 120)
+  scannerReader.timeBetweenDecodingAttempts = 45
 
   await scannerReader.decodeFromConstraints(
     {
@@ -224,22 +280,11 @@ const openCamera = async () => {
       selectedCameraId.value = getPreferredCameraId()
     }
 
-    const constraints = selectedCameraId.value
-      ? {
-          deviceId: { exact: selectedCameraId.value },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        }
-      : {
-          facingMode: { ideal: cameraMode.value },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        }
-
-    await startScanner(constraints)
+    await startScanner(buildScannerConstraints())
+    await optimizeScannerTrack()
     await refreshCameraList()
     isCameraOpen.value = true
-    scannerMessage.value = 'Camera is ready. Hold the barcode or QR code close and steady.'
+    scannerMessage.value = 'Camera is ready. Move the barcode slowly across the center line for faster scanning.'
   } catch (error) {
     errorMessage.value = error.message || 'Unable to access the camera.'
     scannerMessage.value = 'Camera permission is required for scanning.'
@@ -466,7 +511,7 @@ onBeforeUnmount(() => {
               autoplay
               playsinline
               muted
-              class="h-72 w-full object-cover sm:h-80"
+              class="h-44 w-full object-cover sm:h-52"
             ></video>
 
             <div
@@ -477,15 +522,18 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="pointer-events-none absolute inset-0">
-              <div class="absolute left-4 top-4 h-8 w-8 border-l-4 border-t-4 border-blue-500"></div>
-              <div class="absolute right-4 top-4 h-8 w-8 border-r-4 border-t-4 border-blue-500"></div>
-              <div class="absolute bottom-4 left-4 h-8 w-8 border-b-4 border-l-4 border-blue-500"></div>
-              <div class="absolute bottom-4 right-4 h-8 w-8 border-b-4 border-r-4 border-blue-500"></div>
+              <div class="absolute inset-x-8 top-1/2 h-24 -translate-y-1/2 rounded-3xl border border-white/30 bg-white/5"></div>
+              <div class="absolute left-6 top-1/2 h-6 w-6 -translate-y-12 border-l-4 border-t-4 border-blue-500"></div>
+              <div class="absolute right-6 top-1/2 h-6 w-6 -translate-y-12 border-r-4 border-t-4 border-blue-500"></div>
+              <div class="absolute left-6 top-1/2 h-6 w-6 translate-y-6 border-b-4 border-l-4 border-blue-500"></div>
+              <div class="absolute right-6 top-1/2 h-6 w-6 translate-y-6 border-b-4 border-r-4 border-blue-500"></div>
               <div
                 class="absolute inset-x-10 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-blue-400 to-transparent"
               ></div>
             </div>
           </div>
+
+          <p class="mt-4 text-center text-sm text-slate-500">{{ scannerMessage }}</p>
 
           <div class="mt-4 grid gap-3 sm:grid-cols-2">
             <button
