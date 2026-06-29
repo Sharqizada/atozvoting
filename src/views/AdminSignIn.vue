@@ -34,12 +34,14 @@ let scannerReader = null
 let lastDetectedBadge = ''
 let lastDetectedAt = 0
 let audioContext = null
+let scannerTuneInterval = null
 
 const buildScannerConstraints = () => {
   const baseConstraints = {
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-    frameRate: { ideal: 60, min: 24 },
+    width: { ideal: 2560, min: 1280 },
+    height: { ideal: 1440, min: 720 },
+    aspectRatio: { ideal: 1.7777777778 },
+    frameRate: { ideal: 90, min: 30 },
   }
 
   return selectedCameraId.value
@@ -77,7 +79,23 @@ const optimizeScannerTrack = async () => {
 
   if (typeof capabilities.zoom?.max === 'number' && capabilities.zoom.max > 1) {
     const minZoom = typeof capabilities.zoom.min === 'number' ? capabilities.zoom.min : 1
-    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 1.4)) })
+    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 1.9)) })
+  }
+
+  if (typeof capabilities.brightness?.max === 'number' && typeof capabilities.brightness?.min === 'number') {
+    advanced.push({
+      brightness: Math.min(capabilities.brightness.max, Math.max(capabilities.brightness.min, 0.55)),
+    })
+  }
+
+  if (typeof capabilities.contrast?.max === 'number' && typeof capabilities.contrast?.min === 'number') {
+    advanced.push({
+      contrast: Math.min(capabilities.contrast.max, Math.max(capabilities.contrast.min, 1)),
+    })
+  }
+
+  if (capabilities.torch === true) {
+    advanced.push({ torch: true })
   }
 
   if (!advanced.length) {
@@ -133,6 +151,11 @@ const persistAdminSession = (admin) => {
 }
 
 const stopCamera = () => {
+  if (scannerTuneInterval) {
+    window.clearInterval(scannerTuneInterval)
+    scannerTuneInterval = null
+  }
+
   if (scannerReader) {
     scannerReader.reset()
     scannerReader = null
@@ -233,9 +256,11 @@ const startScanner = async (constraints) => {
   const hints = new Map()
   hints.set(DecodeHintType.POSSIBLE_FORMATS, scannerFormats)
   hints.set(DecodeHintType.TRY_HARDER, true)
+  hints.set(DecodeHintType.ALSO_INVERTED, true)
 
-  scannerReader = new BrowserMultiFormatReader(hints, 120)
-  scannerReader.timeBetweenDecodingAttempts = 45
+  scannerReader = new BrowserMultiFormatReader(hints, 80)
+  scannerReader.timeBetweenDecodingAttempts = 18
+  scannerReader.timeBetweenScansMillis = 18
 
   await scannerReader.decodeFromConstraints(
     {
@@ -254,7 +279,7 @@ const startScanner = async (constraints) => {
       }
 
       if (error && !(error instanceof NotFoundException)) {
-        scannerMessage.value = 'Scanning camera is active. Align the barcode inside the frame.'
+        scannerMessage.value = 'Scanning camera is active. Keep the barcode near the center line for instant detection.'
       }
     },
   )
@@ -282,9 +307,12 @@ const openCamera = async () => {
 
     await startScanner(buildScannerConstraints())
     await optimizeScannerTrack()
+    scannerTuneInterval = window.setInterval(() => {
+      optimizeScannerTrack()
+    }, 1200)
     await refreshCameraList()
     isCameraOpen.value = true
-    scannerMessage.value = 'Camera is ready. Move the barcode slowly across the center line for faster scanning.'
+    scannerMessage.value = 'Camera is ready. Move the barcode across the scanner line. Detection is now optimized for faster reads.'
   } catch (error) {
     errorMessage.value = error.message || 'Unable to access the camera.'
     scannerMessage.value = 'Camera permission is required for scanning.'
@@ -501,7 +529,7 @@ onBeforeUnmount(() => {
               autoplay
               playsinline
               muted
-              class="h-44 w-full object-cover sm:h-52"
+              class="h-40 w-full object-cover sm:h-48"
             ></video>
 
             <div
@@ -512,11 +540,11 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="pointer-events-none absolute inset-0">
-              <div class="absolute inset-x-8 top-1/2 h-24 -translate-y-1/2 rounded-3xl border border-white/30 bg-white/5"></div>
-              <div class="absolute left-6 top-1/2 h-6 w-6 -translate-y-12 border-l-4 border-t-4 border-blue-500"></div>
-              <div class="absolute right-6 top-1/2 h-6 w-6 -translate-y-12 border-r-4 border-t-4 border-blue-500"></div>
-              <div class="absolute left-6 top-1/2 h-6 w-6 translate-y-6 border-b-4 border-l-4 border-blue-500"></div>
-              <div class="absolute right-6 top-1/2 h-6 w-6 translate-y-6 border-b-4 border-r-4 border-blue-500"></div>
+              <div class="absolute inset-x-8 top-1/2 h-20 -translate-y-1/2 rounded-3xl border border-white/30 bg-white/5"></div>
+              <div class="absolute left-6 top-1/2 h-6 w-6 -translate-y-10 border-l-4 border-t-4 border-blue-500"></div>
+              <div class="absolute right-6 top-1/2 h-6 w-6 -translate-y-10 border-r-4 border-t-4 border-blue-500"></div>
+              <div class="absolute left-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-l-4 border-blue-500"></div>
+              <div class="absolute right-6 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-r-4 border-blue-500"></div>
               <div
                 class="absolute inset-x-10 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-blue-400 to-transparent"
               ></div>
