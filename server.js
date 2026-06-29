@@ -120,7 +120,7 @@ const getInitials = (name) =>
     .map((part) => part[0]?.toUpperCase() || '')
     .join('')
 
-const sanitizePhotoData = (value) => {
+const sanitizeImageData = (value, label = 'Image', maxLength = 2_000_000) => {
   const normalized = typeof value === 'string' ? value.trim() : ''
 
   if (!normalized) {
@@ -131,12 +131,14 @@ const sanitizePhotoData = (value) => {
     return null
   }
 
-  if (normalized.length > 2_000_000) {
-    throw new Error('Associate photo is too large.')
+  if (normalized.length > maxLength) {
+    throw new Error(`${label} is too large.`)
   }
 
   return normalized
 }
+const sanitizePhotoData = (value) => sanitizeImageData(value, 'Associate photo')
+const sanitizeSiteLogoData = (value) => sanitizeImageData(value, 'Site logo', 1_500_000)
 
 const parseIdList = (value) => {
   if (!Array.isArray(value)) {
@@ -372,16 +374,28 @@ app.use(
     credentials: true,
   }),
 )
-app.use(express.json())
+app.use(express.json({ limit: '5mb' }))
+app.use((error, req, res, next) => {
+  if (error?.type === 'entity.too.large' || error?.status === 413) {
+    return res.status(413).json({ message: 'Request payload is too large.' })
+  }
 
-const query = async (sql, params = []) => {
-  const [rows] = await pool.query(sql, params)
+  next(error)
+})
+
+const queryWith = async (runner, sql, params = []) => {
+  const [rows] = await runner.query(sql, params)
   return rows
 }
 
-const execute = async (sql, params = []) => {
-  await pool.query(sql, params)
+const executeWith = async (runner, sql, params = []) => {
+  const [result] = await runner.query(sql, params)
+  return result
 }
+
+const query = async (sql, params = []) => queryWith(pool, sql, params)
+
+const execute = async (sql, params = []) => executeWith(pool, sql, params)
 
 const getTableCount = async (tableName) => {
   const rows = await query(`SELECT COUNT(*) AS total FROM ${tableName}`)
@@ -400,10 +414,10 @@ const ensureColumn = async (tableName, columnDefinition) => {
   }
 }
 
-const chunkInsert = async (sql, rows, chunkSize = 500) => {
+const chunkInsert = async (sql, rows, chunkSize = 500, runner = pool) => {
   for (let index = 0; index < rows.length; index += chunkSize) {
     const chunk = rows.slice(index, index + chunkSize)
-    await pool.query(sql, [chunk])
+    await runner.query(sql, [chunk])
   }
 }
 
@@ -932,8 +946,9 @@ const ensureRoundAccessCodes = async () => {
   }
 }
 
-const getActiveCategories = async () =>
-  query(
+const getActiveCategories = async (runner = pool) =>
+  queryWith(
+    runner,
     `
       SELECT id, name
       FROM categories
@@ -942,10 +957,10 @@ const getActiveCategories = async () =>
     `,
   )
 
-const syncRoundCategories = async (roundId) => {
-  await execute('DELETE FROM voting_round_categories WHERE voting_round_id = ?', [roundId])
+const syncRoundCategories = async (roundId, runner = pool) => {
+  await executeWith(runner, 'DELETE FROM voting_round_categories WHERE voting_round_id = ?', [roundId])
 
-  const categories = await getActiveCategories()
+  const categories = await getActiveCategories(runner)
 
   if (!categories.length) {
     return
@@ -957,6 +972,8 @@ const syncRoundCategories = async (roundId) => {
       VALUES ?
     `,
     categories.map((category) => [roundId, category.id]),
+    500,
+    runner,
   )
 }
 
@@ -968,11 +985,11 @@ const syncAllRoundCategories = async () => {
   }
 }
 
-const syncRoundParticipants = async (roundId, participantIds) => {
-  await execute('DELETE FROM voting_round_participants WHERE voting_round_id = ?', [roundId])
+const syncRoundParticipants = async (roundId, participantIds, runner = pool) => {
+  await executeWith(runner, 'DELETE FROM voting_round_participants WHERE voting_round_id = ?', [roundId])
 
   if (!participantIds.length) {
-    await execute('UPDATE voting_rounds SET participant_count = 0 WHERE id = ?', [roundId])
+    await executeWith(runner, 'UPDATE voting_rounds SET participant_count = 0 WHERE id = ?', [roundId])
     return
   }
 
@@ -982,9 +999,11 @@ const syncRoundParticipants = async (roundId, participantIds) => {
       VALUES ?
     `,
     participantIds.map((employeeId) => [roundId, employeeId]),
+    500,
+    runner,
   )
 
-  await execute('UPDATE voting_rounds SET participant_count = ? WHERE id = ?', [participantIds.length, roundId])
+  await executeWith(runner, 'UPDATE voting_rounds SET participant_count = ? WHERE id = ?', [participantIds.length, roundId])
 }
 
 const recalculateRoundStats = async (roundId) => {
@@ -1184,8 +1203,9 @@ const getActiveRound = async () => {
   return rounds[0]
 }
 
-const getVotingRoundById = async (roundId) => {
-  const rows = await query(
+const getVotingRoundById = async (roundId, runner = pool) => {
+  const rows = await queryWith(
+    runner,
     `
       SELECT voting_rounds.*, admins.full_name AS creator_name
       FROM voting_rounds
@@ -1199,8 +1219,8 @@ const getVotingRoundById = async (roundId) => {
   return rows[0]
 }
 
-const activateVotingRound = async (roundId) => {
-  const round = await getVotingRoundById(roundId)
+const activateVotingRound = async (roundId, runner = pool) => {
+  const round = await getVotingRoundById(roundId, runner)
 
   if (!round) {
     throw new Error('Voting round not found.')
@@ -1210,7 +1230,8 @@ const activateVotingRound = async (roundId) => {
     throw new Error('Completed voting rounds cannot be made live.')
   }
 
-  await execute(
+  await executeWith(
+    runner,
     `
       UPDATE voting_rounds
       SET status = 'UPCOMING', updated_at = NOW()
@@ -1219,7 +1240,8 @@ const activateVotingRound = async (roundId) => {
     [roundId],
   )
 
-  await execute(
+  await executeWith(
+    runner,
     `
       UPDATE voting_rounds
       SET status = 'ACTIVE', updated_at = NOW()
@@ -1495,6 +1517,10 @@ const parseBooleanInput = (value) => {
     return value.toLowerCase() === 'true'
   }
   return false
+}
+const normalizeVotingRoundStatus = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  return ['UPCOMING', 'ACTIVE', 'COMPLETED'].includes(normalized) ? normalized : 'UPCOMING'
 }
 
 const upsertSettingEntries = async (entries) => {
@@ -1843,7 +1869,10 @@ app.get('/api/voting-rounds', async (_req, res) => {
           voting_round_participants.voting_round_id,
           employees.id,
           employees.full_name,
-          employees.badge_id
+          employees.badge_id,
+          employees.department_name,
+          employees.role_name,
+          employees.photo_data
         FROM voting_round_participants
         INNER JOIN employees ON employees.id = voting_round_participants.employee_id
         ORDER BY employees.full_name ASC
@@ -1874,6 +1903,9 @@ app.get('/api/voting-rounds', async (_req, res) => {
         id: row.id,
         fullName: row.full_name,
         badgeId: row.badge_id,
+        departmentName: row.department_name,
+        roleName: row.role_name,
+        photoData: row.photo_data,
       })
 
       return accumulator
@@ -1898,7 +1930,7 @@ app.get('/api/voting-rounds', async (_req, res) => {
       { title: 'Completed Rounds', value: formatNumber(rounds.filter((row) => row.status === 'COMPLETED').length), note: 'Finished', icon: 'task_alt', panel: 'bg-violet-50', iconBg: 'bg-violet-500' },
     ]
 
-    res.json({
+    const responsePayload = {
       stats,
       rounds: rounds.map((round) => {
         const percent = round.participant_count ? (round.total_votes / round.participant_count) * 100 : 0
@@ -1947,7 +1979,8 @@ app.get('/api/voting-rounds', async (_req, res) => {
       pagination: {
         showing: `Showing 1 to ${rounds.length} of ${rounds.length} rounds`,
       },
-    })
+    }
+    res.json(responsePayload)
   } catch (error) {
     res.status(500).json({ message: 'Unable to load voting rounds.', error: error.message })
   }
@@ -2327,6 +2360,29 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
 
     const categories = await getRoundCategories(activeRound.id)
     const candidates = await getPublicRoundCandidates(activeRound.id)
+    const candidateCards = candidates.map((candidate) => ({
+      id: candidate.id,
+      badgeId: candidate.badge_id,
+      fullName: candidate.full_name,
+      departmentName: candidate.department_name,
+      roleName: candidate.role_name,
+      photoData: candidate.photo_data,
+    }))
+    const ballotCategories = categories.length
+      ? categories.map((category) => ({
+          id: category.id,
+          name: category.name,
+          candidates: candidateCards,
+        }))
+      : candidateCards.length
+        ? [
+            {
+              id: 0,
+              name: 'Nominees',
+              candidates: candidateCards,
+            },
+          ]
+        : []
 
     return res.json({
       hasActiveRound: true,
@@ -2342,18 +2398,7 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
         roundId: activeRound.access_code,
         eligibleAssociates: activeRound.participant_count,
       },
-      categories: categories.map((category) => ({
-        id: category.id,
-        name: category.name,
-        candidates: candidates.map((candidate) => ({
-          id: candidate.id,
-          badgeId: candidate.badge_id,
-          fullName: candidate.full_name,
-          departmentName: candidate.department_name,
-          roleName: candidate.role_name,
-          photoData: candidate.photo_data,
-        })),
-      })),
+      categories: ballotCategories,
       finishedRound: null,
     })
   } catch (error) {
@@ -2873,8 +2918,8 @@ app.post('/api/voting-rounds', async (req, res) => {
   const description = req.body?.description?.trim() || ''
   const startDate = normalizeVotingRoundDateInput(req.body?.startDate, 'start')
   const endDate = normalizeVotingRoundDateInput(req.body?.endDate, 'end')
-  const requestedStatus = req.body?.status?.trim() || 'UPCOMING'
-  const status = requestedStatus === 'COMPLETED' ? 'COMPLETED' : 'UPCOMING'
+  const requestedStatus = normalizeVotingRoundStatus(req.body?.status)
+  const status = requestedStatus
   const participantIds = parseIdList(req.body?.participantIds)
 
   if (!name || !startDate || !endDate || !participantIds.length) {
@@ -2885,9 +2930,13 @@ app.post('/api/voting-rounds', async (req, res) => {
     return res.status(400).json({ message: 'End date must be on or after the start date.' })
   }
 
+  const connection = await pool.getConnection()
+
   try {
     const accessCode = await getUniqueRoundAccessCode()
-    const result = await execute(
+    await connection.beginTransaction()
+    const result = await executeWith(
+      connection,
       `
         INSERT INTO voting_rounds
         (name, description, access_code, start_date, end_date, status, participant_count, total_votes, valid_votes, invalid_votes, created_by_admin_id, created_at)
@@ -2896,16 +2945,25 @@ app.post('/api/voting-rounds', async (req, res) => {
       [name, description, accessCode, startDate, endDate, status, participantIds.length, 1],
     )
 
-    await syncRoundParticipants(result.insertId, participantIds)
-    await syncRoundCategories(result.insertId)
+    await syncRoundParticipants(result.insertId, participantIds, connection)
+    await syncRoundCategories(result.insertId, connection)
 
     if (requestedStatus === 'ACTIVE') {
-      await activateVotingRound(result.insertId)
+      await activateVotingRound(result.insertId, connection)
     }
 
-    return res.json({ success: true, message: 'Voting round created successfully.' })
+    await connection.commit()
+
+    return res.json({
+      success: true,
+      message: 'Voting round created successfully.',
+      status: requestedStatus,
+    })
   } catch (error) {
-    return res.status(500).json({ message: 'Unable to create voting round.', error: error.message })
+    await connection.rollback().catch(() => {})
+    return res.status(500).json({ message: error.message || 'Unable to create voting round.', error: error.message })
+  } finally {
+    connection.release()
   }
 })
 
@@ -2915,8 +2973,8 @@ app.put('/api/voting-rounds/:id', async (req, res) => {
   const description = req.body?.description?.trim() || ''
   const startDate = normalizeVotingRoundDateInput(req.body?.startDate, 'start')
   const endDate = normalizeVotingRoundDateInput(req.body?.endDate, 'end')
-  const requestedStatus = req.body?.status?.trim() || 'UPCOMING'
-  const status = requestedStatus === 'COMPLETED' ? 'COMPLETED' : 'UPCOMING'
+  const requestedStatus = normalizeVotingRoundStatus(req.body?.status)
+  const status = requestedStatus
   const participantIds = parseIdList(req.body?.participantIds)
 
   if (!roundId || !name || !startDate || !endDate || !participantIds.length) {
@@ -2927,8 +2985,12 @@ app.put('/api/voting-rounds/:id', async (req, res) => {
     return res.status(400).json({ message: 'End date must be on or after the start date.' })
   }
 
+  const connection = await pool.getConnection()
+
   try {
-    await execute(
+    await connection.beginTransaction()
+    await executeWith(
+      connection,
       `
         UPDATE voting_rounds
         SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, participant_count = ?, updated_at = NOW()
@@ -2937,16 +2999,25 @@ app.put('/api/voting-rounds/:id', async (req, res) => {
       [name, description, startDate, endDate, status, participantIds.length, roundId],
     )
 
-    await syncRoundParticipants(roundId, participantIds)
-    await syncRoundCategories(roundId)
+    await syncRoundParticipants(roundId, participantIds, connection)
+    await syncRoundCategories(roundId, connection)
 
     if (requestedStatus === 'ACTIVE') {
-      await activateVotingRound(roundId)
+      await activateVotingRound(roundId, connection)
     }
 
-    return res.json({ success: true, message: 'Voting round updated successfully.' })
+    await connection.commit()
+
+    return res.json({
+      success: true,
+      message: 'Voting round updated successfully.',
+      status: requestedStatus,
+    })
   } catch (error) {
-    return res.status(500).json({ message: 'Unable to update voting round.', error: error.message })
+    await connection.rollback().catch(() => {})
+    return res.status(500).json({ message: error.message || 'Unable to update voting round.', error: error.message })
+  } finally {
+    connection.release()
   }
 })
 
@@ -3332,12 +3403,14 @@ app.post('/api/settings', async (req, res) => {
   const siteInfo = req.body?.siteInfo || {}
   const votingSettings = req.body?.votingSettings || {}
   const emailSettings = req.body?.emailSettings || {}
+  let siteLogo = null
 
   try {
+    siteLogo = sanitizeSiteLogoData(siteInfo.siteLogo)
     await upsertSettingEntries([
       ['site_name', 'general', siteInfo.siteName || 'Inbound Star Voting'],
       ['site_tagline', 'general', siteInfo.siteTagline || 'Recognize. Appreciate. Celebrate.'],
-      ['site_logo', 'general', siteInfo.siteLogo || ''],
+      ['site_logo', 'general', siteLogo || ''],
       ['timezone', 'general', siteInfo.timezone || '(UTC+05:30) Asia/Kolkata'],
       ['date_format', 'general', siteInfo.dateFormat || 'June 3, 2026'],
       ['time_format', 'general', siteInfo.timeFormat || '12 Hour (hh:mm AM/PM)'],
@@ -3355,7 +3428,8 @@ app.post('/api/settings', async (req, res) => {
 
     return res.json({ success: true, message: 'Settings saved successfully.' })
   } catch (error) {
-    return res.status(500).json({ message: 'Unable to save settings.', error: error.message })
+    const statusCode = /site logo/i.test(error.message || '') ? 400 : 500
+    return res.status(statusCode).json({ message: error.message || 'Unable to save settings.', error: error.message })
   }
 })
 

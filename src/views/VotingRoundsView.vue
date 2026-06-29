@@ -391,16 +391,10 @@ const openWinnerPreview = async (round) => {
                 </span>
               </td>
               <td class="px-4 py-5 text-xs text-slate-500">
-                <p class="font-medium text-slate-700">{{ round.duration[2] }}</p>
-                <p class="mt-1">{{ round.duration[0] }}</p>
-                <p class="mt-1">{{ round.duration[1] }}</p>
-                <span class="mt-2 inline-flex rounded-lg px-3 py-1 font-medium" :class="round.durationClass">
-                  {{ round.status }}
-                </span>
                 <button
                   type="button"
                   @click="openRoundDetailModal('duration', round)"
-                  class="mt-3 block text-xs font-semibold text-blue-600 transition hover:text-blue-700"
+                  class="block text-xs font-semibold text-blue-600 transition hover:text-blue-700"
                 >
                   View details
                 </button>
@@ -442,31 +436,13 @@ const openWinnerPreview = async (round) => {
                 </div>
               </td>
               <td class="px-4 py-5">
-                <div class="space-y-2">
-                  <p class="font-semibold text-slate-700">{{ round.employees }} nominees</p>
-                  <div class="flex flex-wrap gap-2">
-                    <span
-                      v-for="participant in round.participantPreview.slice(0, 3)"
-                      :key="participant.id"
-                      class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600"
-                    >
-                      {{ participant.fullName }}
-                    </span>
-                    <span
-                      v-if="round.participantPreview.length > 3"
-                      class="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-600"
-                    >
-                      +{{ round.participantPreview.length - 3 }} more
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    @click="openRoundDetailModal('nominees', round)"
-                    class="text-xs font-semibold text-blue-600 transition hover:text-blue-700"
-                  >
-                    View full list
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  @click="openRoundDetailModal('nominees', round)"
+                  class="text-xs font-semibold text-blue-600 transition hover:text-blue-700"
+                >
+                  View details
+                </button>
               </td>
               <td class="px-4 py-5">
                 <div class="w-28">

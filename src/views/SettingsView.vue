@@ -77,7 +77,48 @@ const clearLogo = () => {
   }
 }
 
-const handleLogoSelection = (event) => {
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(`${reader.result || ''}`)
+    reader.onerror = () => reject(new Error('Unable to read the selected logo file.'))
+    reader.readAsDataURL(file)
+  })
+
+const loadImageElement = (src) =>
+  new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Unable to process the selected logo image.'))
+    image.src = src
+  })
+
+const buildOptimizedLogoDataUrl = async (file) => {
+  if (file.type === 'image/svg+xml') {
+    return readFileAsDataUrl(file)
+  }
+
+  const sourceUrl = await readFileAsDataUrl(file)
+  const image = await loadImageElement(sourceUrl)
+  const maxDimension = 320
+  const scale = Math.min(1, maxDimension / Math.max(image.width || 1, image.height || 1))
+  const width = Math.max(1, Math.round((image.width || 1) * scale))
+  const height = Math.max(1, Math.round((image.height || 1) * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('Unable to prepare the logo image.')
+  }
+
+  context.drawImage(image, 0, 0, width, height)
+  return canvas.toDataURL('image/webp', 0.82)
+}
+
+const handleLogoSelection = async (event) => {
   const file = event.target?.files?.[0]
 
   if (!file) {
@@ -90,21 +131,19 @@ const handleLogoSelection = (event) => {
     return
   }
 
-  if (file.size > 2 * 1024 * 1024) {
-    saveError.value = 'Logo image must be 2MB or smaller.'
+  if (file.size > 5 * 1024 * 1024) {
+    saveError.value = 'Logo image must be 5MB or smaller.'
     event.target.value = ''
     return
   }
 
-  const reader = new FileReader()
-  reader.onload = () => {
-    siteInfo.siteLogo = `${reader.result || ''}`
+  try {
+    siteInfo.siteLogo = await buildOptimizedLogoDataUrl(file)
     saveError.value = ''
+  } catch (error) {
+    saveError.value = error.message || 'Unable to process the selected logo file.'
+    event.target.value = ''
   }
-  reader.onerror = () => {
-    saveError.value = 'Unable to read the selected logo file.'
-  }
-  reader.readAsDataURL(file)
 }
 
 const saveSettings = async () => {
@@ -184,7 +223,7 @@ const saveSettings = async () => {
                 Remove
               </button>
             </div>
-            <p class="mt-3 text-xs text-slate-400">PNG, JPG, WEBP, or SVG up to 2MB.</p>
+            <p class="mt-3 text-xs text-slate-400">PNG, JPG, WEBP, or SVG. Large images are optimized automatically before save.</p>
           </div>
 
           <div class="grid gap-4 md:grid-cols-2">
