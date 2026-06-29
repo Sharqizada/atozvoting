@@ -169,7 +169,9 @@ const submitRound = async () => {
     await load()
     closeCreateModal()
   } catch (requestError) {
-    submitError.value = requestError.message || 'Unable to save voting round.'
+    submitError.value =
+      requestError.message ||
+      (editingRoundId.value ? 'Unable to update voting round.' : 'Unable to create voting round.')
   } finally {
     isSubmitting.value = false
   }
@@ -518,9 +520,9 @@ const openWinnerPreview = async (round) => {
       </div>
     </section>
 
-    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-      <div class="w-full max-w-5xl rounded-3xl bg-white p-6 shadow-2xl">
-        <div class="flex items-start justify-between gap-4">
+    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-4">
+      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5">
           <div>
             <p class="text-xl font-semibold text-slate-900">{{ editingRoundId ? 'Edit Voting Round' : 'Create Voting Round' }}</p>
           </div>
@@ -529,131 +531,133 @@ const openWinnerPreview = async (round) => {
           </button>
         </div>
 
-        <div v-if="submitError" class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
-          {{ submitError }}
-        </div>
-
-        <div class="mt-6 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
-          <div class="grid gap-4">
-            <label class="block">
-              <span class="mb-2 block text-sm text-slate-600">Round Name</span>
-              <input v-model="createForm.name" type="text" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
-            </label>
-            <label class="block">
-              <span class="mb-2 block text-sm text-slate-600">Description</span>
-              <textarea
-                v-model="createForm.description"
-                rows="4"
-                placeholder="Enter the voting round description shown on the Home page."
-                class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"
-              ></textarea>
-            </label>
-            <label class="block">
-              <span class="mb-2 block text-sm text-slate-600">Random Round ID</span>
-              <input
-                :value="createForm.roundId || 'Auto-generated after save'"
-                type="text"
-                readonly
-                class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500 outline-none"
-              />
-            </label>
-            <label class="block">
-              <span class="mb-2 block text-sm text-slate-600">Start Date</span>
-              <input v-model="createForm.startDate" type="datetime-local" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
-            </label>
-            <label class="block">
-              <span class="mb-2 block text-sm text-slate-600">End Date</span>
-              <input v-model="createForm.endDate" type="datetime-local" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
-            </label>
-            <label class="block">
-              <span class="mb-2 block text-sm text-slate-600">Status</span>
-              <select v-model="createForm.status" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none">
-                <option value="UPCOMING">Upcoming</option>
-                <option value="ACTIVE">Live</option>
-                <option value="COMPLETED">Completed</option>
-              </select>
-              <p class="mt-2 text-xs text-slate-400">Only one round can be live at a time. You can also control this from the row action buttons.</p>
-            </label>
-
-            <div class="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-              <div class="flex items-center justify-between gap-4">
-                <p class="text-sm font-medium text-slate-700">Selected Nominees</p>
-                <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600">
-                  {{ createForm.participantIds.length }} selected
-                </span>
-              </div>
-              <div class="mt-3 flex flex-wrap gap-2">
-                <span
-                  v-for="employee in selectedEmployees"
-                  :key="employee.id"
-                  class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-slate-600"
-                >
-                  {{ employee.fullName }}
-                  <button type="button" @click="toggleParticipant(employee.id)" class="text-slate-400">
-                    <span class="material-symbols-outlined text-sm">close</span>
-                  </button>
-                </span>
-                <p v-if="!selectedEmployees.length" class="text-sm text-slate-500">
-                  No nominees selected yet.
-                </p>
-              </div>
-            </div>
+        <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div v-if="submitError" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            {{ submitError }}
           </div>
 
-          <div class="rounded-3xl border border-slate-200 bg-white">
-            <div class="border-b border-slate-200 px-5 py-4">
-              <div class="flex flex-col gap-3">
-                <p class="text-lg font-semibold text-slate-900">Assign Nominees</p>
-                <div class="relative">
-                  <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400">search</span>
-                  <input
-                    v-model="employeeSearch"
-                    type="text"
-                    placeholder="Search nominees..."
-                    class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-            <div class="max-h-[420px] space-y-3 overflow-y-auto px-5 py-4">
-              <label
-                v-for="employee in filteredEmployeeOptions"
-                :key="employee.id"
-                class="flex cursor-pointer items-center gap-4 rounded-2xl border border-slate-200 px-4 py-3"
-              >
+          <div class="mt-6 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+            <div class="grid gap-4">
+              <label class="block">
+                <span class="mb-2 block text-sm text-slate-600">Round Name</span>
+                <input v-model="createForm.name" type="text" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
+              </label>
+              <label class="block">
+                <span class="mb-2 block text-sm text-slate-600">Description</span>
+                <textarea
+                  v-model="createForm.description"
+                  rows="4"
+                  placeholder="Enter the voting round description shown on the Home page."
+                  class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"
+                ></textarea>
+              </label>
+              <label class="block">
+                <span class="mb-2 block text-sm text-slate-600">Random Round ID</span>
                 <input
-                  :checked="createForm.participantIds.includes(employee.id)"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-slate-300 text-blue-600"
-                  @change="toggleParticipant(employee.id)"
+                  :value="createForm.roundId || 'Auto-generated after save'"
+                  type="text"
+                  readonly
+                  class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500 outline-none"
                 />
-                <img
-                  v-if="employee.photoData"
-                  :src="employee.photoData"
-                  :alt="employee.fullName"
-                  class="h-11 w-11 rounded-full object-cover"
-                />
-                <div
-                  v-else
-                  class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-slate-600"
-                >
-                  <span class="material-symbols-outlined text-base">person</span>
+              </label>
+              <label class="block">
+                <span class="mb-2 block text-sm text-slate-600">Start Date</span>
+                <input v-model="createForm.startDate" type="date" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
+              </label>
+              <label class="block">
+                <span class="mb-2 block text-sm text-slate-600">End Date</span>
+                <input v-model="createForm.endDate" type="date" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
+              </label>
+              <label class="block">
+                <span class="mb-2 block text-sm text-slate-600">Status</span>
+                <select v-model="createForm.status" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none">
+                  <option value="UPCOMING">Upcoming</option>
+                  <option value="ACTIVE">Live</option>
+                  <option value="COMPLETED">Completed</option>
+                </select>
+                <p class="mt-2 text-xs text-slate-400">Only one round can be live at a time. You can also control this from the row action buttons.</p>
+              </label>
+
+              <div class="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-center justify-between gap-4">
+                  <p class="text-sm font-medium text-slate-700">Selected Nominees</p>
+                  <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600">
+                    {{ createForm.participantIds.length }} selected
+                  </span>
                 </div>
-                <div class="min-w-0 flex-1">
-                  <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
-                  <p class="mt-1 text-xs text-slate-400">
-                    {{ employee.badgeId }} · {{ employee.departmentName }} / {{ employee.roleName }}
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <span
+                    v-for="employee in selectedEmployees"
+                    :key="employee.id"
+                    class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-slate-600"
+                  >
+                    {{ employee.fullName }}
+                    <button type="button" @click="toggleParticipant(employee.id)" class="text-slate-400">
+                      <span class="material-symbols-outlined text-sm">close</span>
+                    </button>
+                  </span>
+                  <p v-if="!selectedEmployees.length" class="text-sm text-slate-500">
+                    No nominees selected yet.
                   </p>
                 </div>
-              </label>
-              <div v-if="!filteredEmployeeOptions.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-                No active associates match this search.
+              </div>
+            </div>
+
+            <div class="rounded-3xl border border-slate-200 bg-white">
+              <div class="border-b border-slate-200 px-5 py-4">
+                <div class="flex flex-col gap-3">
+                  <p class="text-lg font-semibold text-slate-900">Assign Nominees</p>
+                  <div class="relative">
+                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400">search</span>
+                    <input
+                      v-model="employeeSearch"
+                      type="text"
+                      placeholder="Search nominees..."
+                      class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div class="max-h-[420px] space-y-3 overflow-y-auto px-5 py-4">
+                <label
+                  v-for="employee in filteredEmployeeOptions"
+                  :key="employee.id"
+                  class="flex cursor-pointer items-center gap-4 rounded-2xl border border-slate-200 px-4 py-3"
+                >
+                  <input
+                    :checked="createForm.participantIds.includes(employee.id)"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300 text-blue-600"
+                    @change="toggleParticipant(employee.id)"
+                  />
+                  <img
+                    v-if="employee.photoData"
+                    :src="employee.photoData"
+                    :alt="employee.fullName"
+                    class="h-11 w-11 rounded-full object-cover"
+                  />
+                  <div
+                    v-else
+                    class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-slate-600"
+                  >
+                    <span class="material-symbols-outlined text-base">person</span>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
+                    <p class="mt-1 text-xs text-slate-400">
+                      {{ employee.badgeId }} · {{ employee.departmentName }} / {{ employee.roleName }}
+                    </p>
+                  </div>
+                </label>
+                <div v-if="!filteredEmployeeOptions.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  No active associates match this search.
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="mt-6 flex flex-wrap justify-end gap-3">
+        <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 bg-white px-6 py-4">
           <button type="button" @click="closeCreateModal" class="inline-flex h-11 items-center rounded-xl border border-slate-200 px-4 text-sm text-slate-600">
             Cancel
           </button>

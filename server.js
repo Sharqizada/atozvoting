@@ -75,6 +75,30 @@ const formatDateTimeValue = (value) => {
   const date = new Date(value)
   return `${formatDateValue(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
+const formatMySqlDateTime = (value) => {
+  const date = new Date(value)
+  return `${formatDateValue(date)} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+}
+const normalizeVotingRoundDateInput = (value, boundary = 'start') => {
+  const trimmed = `${value || ''}`.trim()
+
+  if (!trimmed) {
+    return null
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return `${trimmed} ${boundary === 'end' ? '23:59:59' : '00:00:00'}`
+  }
+
+  const normalizedValue = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T')
+  const parsedDate = new Date(normalizedValue)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null
+  }
+
+  return formatMySqlDateTime(parsedDate)
+}
 const formatDateLabel = (value) => {
   const date = new Date(value)
   return `${date.toLocaleString('en-US', { month: 'short' })} ${date.getDate()}, ${date.getFullYear()}`
@@ -1904,8 +1928,8 @@ app.get('/api/voting-rounds', async (_req, res) => {
           creator: round.creator_name || 'Admin',
           createdAt: formatDateTime(round.created_at),
           dot: round.status === 'ACTIVE' ? 'bg-emerald-500' : round.status === 'UPCOMING' ? 'bg-blue-500' : 'bg-slate-400',
-          rawStartDate: formatDateTimeValue(round.start_date),
-          rawEndDate: formatDateTimeValue(round.end_date),
+          rawStartDate: formatDateValue(round.start_date),
+          rawEndDate: formatDateValue(round.end_date),
           participantIds: (participantMap.get(round.id) || []).map((participant) => participant.id),
           participantPreview: participantMap.get(round.id) || [],
         }
@@ -2844,14 +2868,18 @@ app.get('/api/past-winners', async (_req, res) => {
 app.post('/api/voting-rounds', async (req, res) => {
   const name = req.body?.name?.trim()
   const description = req.body?.description?.trim() || ''
-  const startDate = req.body?.startDate?.trim()
-  const endDate = req.body?.endDate?.trim()
+  const startDate = normalizeVotingRoundDateInput(req.body?.startDate, 'start')
+  const endDate = normalizeVotingRoundDateInput(req.body?.endDate, 'end')
   const requestedStatus = req.body?.status?.trim() || 'UPCOMING'
   const status = requestedStatus === 'COMPLETED' ? 'COMPLETED' : 'UPCOMING'
   const participantIds = parseIdList(req.body?.participantIds)
 
   if (!name || !startDate || !endDate || !participantIds.length) {
     return res.status(400).json({ message: 'Round name, dates, and at least one associate are required.' })
+  }
+
+  if (new Date(startDate) > new Date(endDate)) {
+    return res.status(400).json({ message: 'End date must be on or after the start date.' })
   }
 
   try {
@@ -2882,14 +2910,18 @@ app.put('/api/voting-rounds/:id', async (req, res) => {
   const roundId = Number(req.params.id)
   const name = req.body?.name?.trim()
   const description = req.body?.description?.trim() || ''
-  const startDate = req.body?.startDate?.trim()
-  const endDate = req.body?.endDate?.trim()
+  const startDate = normalizeVotingRoundDateInput(req.body?.startDate, 'start')
+  const endDate = normalizeVotingRoundDateInput(req.body?.endDate, 'end')
   const requestedStatus = req.body?.status?.trim() || 'UPCOMING'
   const status = requestedStatus === 'COMPLETED' ? 'COMPLETED' : 'UPCOMING'
   const participantIds = parseIdList(req.body?.participantIds)
 
   if (!roundId || !name || !startDate || !endDate || !participantIds.length) {
     return res.status(400).json({ message: 'Valid round data is required.' })
+  }
+
+  if (new Date(startDate) > new Date(endDate)) {
+    return res.status(400).json({ message: 'End date must be on or after the start date.' })
   }
 
   try {
