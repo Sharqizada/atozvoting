@@ -600,6 +600,7 @@ onBeforeUnmount(() => {
 
             <div class="pointer-events-none absolute inset-0">
               <div class="login-brand-guide absolute inset-x-0 top-1/2 h-20 -translate-y-1/2 rounded-3xl border bg-white/5"></div>
+              <div class="login-brand-scan-band absolute inset-x-0 top-1/2 h-20 -translate-y-1/2 rounded-3xl"></div>
               <div class="login-brand-corner absolute left-3 top-1/2 h-6 w-6 -translate-y-10 border-l-4 border-t-4"></div>
               <div class="login-brand-corner absolute right-3 top-1/2 h-6 w-6 -translate-y-10 border-r-4 border-t-4"></div>
               <div class="login-brand-corner absolute left-3 top-1/2 h-6 w-6 translate-y-4 border-b-4 border-l-4"></div>
@@ -694,14 +695,68 @@ onBeforeUnmount(() => {
 
 .login-brand-guide {
   border-color: rgba(255, 255, 255, 0.36);
+  animation: loginScannerFramePulse 2.2s ease-in-out infinite;
+}
+
+.login-brand-scan-band {
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.04) 18%,
+      var(--brand-accent-soft) 50%,
+      rgba(255, 255, 255, 0.04) 82%,
+      transparent 100%
+    );
+  opacity: 0.85;
+  animation: loginScannerSweep 2s ease-in-out infinite;
 }
 
 .login-brand-corner {
   border-color: var(--brand-accent);
+  animation: loginScannerCornerPulse 1.5s ease-in-out infinite;
 }
 
 .login-brand-scan-line {
   background: linear-gradient(90deg, transparent, var(--brand-accent), transparent);
   box-shadow: 0 0 28px var(--brand-accent-soft);
+  animation: loginScannerSweep 2s ease-in-out infinite;
+}
+
+@keyframes loginScannerSweep {
+  0%,
+  100% {
+    transform: translateY(-34px);
+    opacity: 0.4;
+  }
+
+  50% {
+    transform: translateY(34px);
+    opacity: 1;
+  }
+}
+
+@keyframes loginScannerFramePulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 rgba(255, 255, 255, 0);
+    opacity: 0.72;
+  }
+
+  50% {
+    box-shadow: inset 0 0 24px var(--brand-accent-soft);
+    opacity: 1;
+  }
+}
+
+@keyframes loginScannerCornerPulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 </style>
