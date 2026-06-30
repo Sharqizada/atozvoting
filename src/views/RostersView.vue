@@ -8,8 +8,12 @@ const { data, error, load } = useAdminPage('/api/rosters-v2', {
   stats: [],
   rosters: [],
   rosterSections: [],
+  sectionDetailOptions: {
+    ISS: [],
+    WATER_SPIDER: [],
+  },
   floors: ['P2', 'P3', 'P4'],
-  stationTypes: ['AR', 'UNIVERSAL'],
+  stationTypes: ['AR', 'UNIVERSAL', 'QUANTITY_STOW'],
   stations: [],
   employeeOptions: [],
   pagination: {
@@ -20,8 +24,9 @@ const { data, error, load } = useAdminPage('/api/rosters-v2', {
 const stats = computed(() => data.value.stats || [])
 const rosters = computed(() => data.value.rosters || [])
 const rosterSections = computed(() => data.value.rosterSections || [])
+const sectionDetailOptions = computed(() => data.value.sectionDetailOptions || { ISS: [], WATER_SPIDER: [] })
 const floors = computed(() => data.value.floors || ['P2', 'P3', 'P4'])
-const stationTypes = computed(() => data.value.stationTypes || ['AR', 'UNIVERSAL'])
+const stationTypes = computed(() => data.value.stationTypes || ['AR', 'UNIVERSAL', 'QUANTITY_STOW'])
 const stations = computed(() => data.value.stations || [])
 const employeeOptions = computed(() => data.value.employeeOptions || [])
 const searchTerm = ref('')
@@ -29,6 +34,7 @@ const employeeSearch = ref('')
 const showCreateModal = ref(false)
 const showStationsModal = ref(false)
 const showStationListModal = ref(false)
+const showAssignmentPromptModal = ref(false)
 const showSwapModal = ref(false)
 const editingRosterId = ref(null)
 const submitError = ref('')
@@ -59,6 +65,14 @@ const stationListModalState = reactive({
   accentClass: '',
   emptyMessage: '',
   stations: [],
+})
+const assignmentPromptState = reactive({
+  employeeId: null,
+  sectionKey: '',
+  mode: 'detail',
+  title: '',
+  description: '',
+  options: [],
 })
 
 const filteredRosters = computed(() =>
@@ -154,6 +168,161 @@ const paginationLabel = computed(
   () => `Showing 1 to ${filteredRosters.value.length} of ${rosters.value.length} rosters`,
 )
 
+const normalizeSectionKey = (value) => `${value || ''}`.trim().toUpperCase()
+const normalizeFloorCode = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  return floors.value.includes(normalized) ? normalized : ''
+}
+const isQuantityStowSection = (sectionKey) => normalizeSectionKey(sectionKey) === 'QUANTITY_STOW'
+const supportsStationAssignment = (sectionKey) =>
+  ['STOW', 'CUBISCAN', 'QUANTITY_STOW'].includes(normalizeSectionKey(sectionKey))
+const getSectionDetailOptions = (sectionKey) => sectionDetailOptions.value[normalizeSectionKey(sectionKey)] || []
+const requiresDetailSelection = (sectionKey) => getSectionDetailOptions(sectionKey).length > 0
+const formatStationTypeLabel = (stationType) => {
+  const normalized = `${stationType || ''}`.trim().toUpperCase()
+
+  if (normalized === 'AR') {
+    return 'AR Station'
+  }
+
+  if (normalized === 'QUANTITY_STOW') {
+    return 'Quantity Stow Station'
+  }
+
+  return 'Universal Station'
+}
+const isDetailCompatibleWithFloor = (sectionKey, detailKey, floorCode) => {
+  const normalizedSectionKey = normalizeSectionKey(sectionKey)
+  const normalizedDetailKey = `${detailKey || ''}`.trim().toUpperCase()
+  const normalizedFloorCode = normalizeFloorCode(floorCode)
+
+  if (!normalizedDetailKey || !normalizedFloorCode) {
+    return true
+  }
+
+  if (normalizedSectionKey === 'WATER_SPIDER') {
+    return normalizedDetailKey.startsWith(`${normalizedFloorCode}_`)
+  }
+
+  if (normalizedSectionKey === 'ISS' && /^STOW_ANDON_P[234]$/.test(normalizedDetailKey)) {
+    return normalizedDetailKey.endsWith(normalizedFloorCode)
+  }
+
+  return true
+}
+const getAllowedStationsForAssignment = (assignment) => {
+  const floorCode = normalizeFloorCode(assignment?.floorCode)
+  const sectionKey = normalizeSectionKey(assignment?.sectionKey)
+
+  if (!floorCode || !supportsStationAssignment(sectionKey)) {
+    return []
+  }
+
+  return stations.value.filter((station) => {
+    if (station.floorCode !== floorCode) {
+      return false
+    }
+
+    if (sectionKey === 'QUANTITY_STOW') {
+      return station.stationType === 'QUANTITY_STOW'
+    }
+
+    return station.stationType !== 'QUANTITY_STOW'
+  })
+}
+const getAllowedStationsForEmployee = (employeeId) => getAllowedStationsForAssignment(assignmentLookup.value[employeeId])
+const sanitizeAssignment = (assignment) => {
+  const employeeId = Number(assignment?.employeeId)
+  const sectionKey = normalizeSectionKey(assignment?.sectionKey)
+  const floorCode = normalizeFloorCode(assignment?.floorCode) || floors.value[0] || 'P2'
+  let detailKey = `${assignment?.detailKey || ''}`.trim().toUpperCase()
+  let stationId = Number(assignment?.stationId) || null
+
+  if (!employeeId || !sectionKey) {
+    return null
+  }
+
+  if (!requiresDetailSelection(sectionKey)) {
+    detailKey = ''
+  } else if (
+    !getSectionDetailOptions(sectionKey).some((option) => option.key === detailKey) ||
+    !isDetailCompatibleWithFloor(sectionKey, detailKey, floorCode)
+  ) {
+    detailKey = ''
+  }
+
+  if (!supportsStationAssignment(sectionKey)) {
+    stationId = null
+  }
+
+  if (stationId) {
+    const station = stationLookup.value[stationId]
+    const matchesFloor = station?.floorCode === floorCode
+    const matchesType =
+      sectionKey === 'QUANTITY_STOW'
+        ? station?.stationType === 'QUANTITY_STOW'
+        : station?.stationType !== 'QUANTITY_STOW'
+
+    if (!matchesFloor || !matchesType) {
+      stationId = null
+    }
+  }
+
+  return {
+    employeeId,
+    sectionKey,
+    floorCode,
+    stationId,
+    detailKey,
+  }
+}
+const getAssignmentDetailButtonLabel = (employeeId) => {
+  const assignment = assignmentLookup.value[employeeId]
+
+  if (!assignment?.sectionKey) {
+    return 'Choose'
+  }
+
+  if (requiresDetailSelection(assignment.sectionKey)) {
+    return (
+      getSectionDetailOptions(assignment.sectionKey).find((option) => option.key === assignment.detailKey)?.label ||
+      'Choose role'
+    )
+  }
+
+  if (isQuantityStowSection(assignment.sectionKey)) {
+    return assignment.stationId
+      ? stationLookup.value[assignment.stationId]?.displayLabel || 'Change quantity station'
+      : 'Choose quantity station'
+  }
+
+  return 'No prompt required'
+}
+const getAssignmentSummaryText = (employeeId) => {
+  const assignment = assignmentLookup.value[employeeId]
+
+  if (!assignment?.sectionKey) {
+    return 'Not assigned yet.'
+  }
+
+  if (requiresDetailSelection(assignment.sectionKey)) {
+    return (
+      getSectionDetailOptions(assignment.sectionKey).find((option) => option.key === assignment.detailKey)?.label ||
+      'Choose a role for this associate.'
+    )
+  }
+
+  if (assignment.stationId) {
+    return stationLookup.value[assignment.stationId]?.displayLabel || 'Station selected.'
+  }
+
+  if (assignment.floorCode) {
+    return `Assigned to ${assignment.floorCode}`
+  }
+
+  return 'No extra assignment yet.'
+}
+
 const shuffleItems = (items) => {
   const cloned = [...items]
 
@@ -166,15 +335,59 @@ const shuffleItems = (items) => {
 }
 
 const buildDefaultAssignments = () => {
-  const normalStations = shuffleItems(stations.value.filter((station) => !station.isFarAway))
-  const farStations = shuffleItems(stations.value.filter((station) => station.isFarAway))
-  const stationPool = [...normalStations, ...farStations]
+  const floorCodes = floors.value.length ? floors.value : ['P2', 'P3', 'P4']
+  const usedStationIds = new Set()
+  const normalStationsByFloor = Object.fromEntries(
+    floorCodes.map((floorCode) => [
+      floorCode,
+      shuffleItems(
+        stations.value.filter(
+          (station) =>
+            !station.isFarAway && station.floorCode === floorCode && station.stationType !== 'QUANTITY_STOW',
+        ),
+      ),
+    ]),
+  )
+  const farStationsByFloor = Object.fromEntries(
+    floorCodes.map((floorCode) => [
+      floorCode,
+      shuffleItems(
+        stations.value.filter(
+          (station) =>
+            station.isFarAway && station.floorCode === floorCode && station.stationType !== 'QUANTITY_STOW',
+        ),
+      ),
+    ]),
+  )
+  const fallbackFarStations = shuffleItems(
+    stations.value.filter((station) => station.isFarAway && station.stationType !== 'QUANTITY_STOW'),
+  )
 
-  return employeeOptions.value.map((employee, index) => ({
-    employeeId: employee.id,
-    sectionKey: 'STOW',
-    stationId: stationPool[index]?.id || null,
-  }))
+  const pickStation = (pool = []) => {
+    const station = pool.find((entry) => !usedStationIds.has(entry.id))
+
+    if (station) {
+      usedStationIds.add(station.id)
+    }
+
+    return station || null
+  }
+
+  return employeeOptions.value.map((employee, index) => {
+    const floorCode = floorCodes[index % floorCodes.length]
+    const station =
+      pickStation(normalStationsByFloor[floorCode]) ||
+      pickStation(farStationsByFloor[floorCode]) ||
+      pickStation(fallbackFarStations)
+
+    return {
+      employeeId: employee.id,
+      sectionKey: 'STOW',
+      floorCode,
+      stationId: station?.id || null,
+      detailKey: '',
+    }
+  })
 }
 
 const resetForm = () => {
@@ -212,6 +425,8 @@ const openEditModal = (roster) => {
       employeeId: associate.id,
       sectionKey: section.key,
       stationId: associate.stationId || null,
+      floorCode: associate.floorCode || associate.stationFloorCode || floors.value[0] || 'P2',
+      detailKey: associate.detailKey || '',
     })),
   )
   showCreateModal.value = true
@@ -250,26 +465,92 @@ const openStationListModal = ({ title, description, accentClass, emptyMessage, s
   showStationListModal.value = true
 }
 
+const closeAssignmentPromptModal = () => {
+  showAssignmentPromptModal.value = false
+  assignmentPromptState.employeeId = null
+  assignmentPromptState.sectionKey = ''
+  assignmentPromptState.mode = 'detail'
+  assignmentPromptState.title = ''
+  assignmentPromptState.description = ''
+  assignmentPromptState.options = []
+}
+
+const openAssignmentPromptModal = (employeeId, requestedSectionKey = '') => {
+  const currentAssignment = assignmentLookup.value[employeeId]
+  const sectionKey = normalizeSectionKey(requestedSectionKey || currentAssignment?.sectionKey)
+
+  if (!employeeId || !sectionKey) {
+    return
+  }
+
+  if (requiresDetailSelection(sectionKey)) {
+    assignmentPromptState.employeeId = employeeId
+    assignmentPromptState.sectionKey = sectionKey
+    assignmentPromptState.mode = 'detail'
+    assignmentPromptState.title = sectionKey === 'ISS' ? 'Choose ISS Role' : 'Choose Water Spider Role'
+    assignmentPromptState.description =
+      sectionKey === 'ISS'
+        ? 'Select the ISS role for this associate. Multiple associates can share the same ISS role.'
+        : 'Select the Water Spider task for this associate.'
+    assignmentPromptState.options = getSectionDetailOptions(sectionKey)
+    showAssignmentPromptModal.value = true
+    return
+  }
+
+  if (isQuantityStowSection(sectionKey)) {
+    assignmentPromptState.employeeId = employeeId
+    assignmentPromptState.sectionKey = sectionKey
+    assignmentPromptState.mode = 'station'
+    assignmentPromptState.title = 'Choose Quantity Station'
+    assignmentPromptState.description =
+      'Select a Quantity Stow station from the associate floor. Occupied stations can be swapped in one click.'
+    assignmentPromptState.options = getAllowedStationsForEmployee(employeeId)
+    showAssignmentPromptModal.value = true
+  }
+}
+
 const updateAssignment = (employeeId, nextAssignment) => {
   const currentAssignments = createForm.assignments.filter((assignment) => assignment.employeeId !== employeeId)
+  const sanitizedAssignment = nextAssignment ? sanitizeAssignment({ ...nextAssignment, employeeId }) : null
 
-  if (!nextAssignment?.sectionKey) {
+  if (!sanitizedAssignment?.sectionKey) {
     createForm.assignments = currentAssignments
     return
   }
 
-  createForm.assignments = [
-    ...currentAssignments,
-    {
-      employeeId,
-      sectionKey: `${nextAssignment.sectionKey}`.trim().toUpperCase(),
-      stationId: Number(nextAssignment.stationId) || null,
-    },
-  ]
+  createForm.assignments = [...currentAssignments, sanitizedAssignment]
+}
+
+const setEmployeeFloor = (employeeId, floorCode) => {
+  const currentAssignment = assignmentLookup.value[employeeId]
+  const normalizedFloorCode = normalizeFloorCode(floorCode)
+
+  if (!currentAssignment || !normalizedFloorCode) {
+    return
+  }
+
+  updateAssignment(employeeId, {
+    ...currentAssignment,
+    floorCode: normalizedFloorCode,
+  })
+
+  const updatedAssignment = assignmentLookup.value[employeeId]
+
+  if (!updatedAssignment) {
+    return
+  }
+
+  if (requiresDetailSelection(updatedAssignment.sectionKey) && !updatedAssignment.detailKey) {
+    openAssignmentPromptModal(employeeId, updatedAssignment.sectionKey)
+  }
+
+  if (isQuantityStowSection(updatedAssignment.sectionKey) && !updatedAssignment.stationId) {
+    openAssignmentPromptModal(employeeId, updatedAssignment.sectionKey)
+  }
 }
 
 const setEmployeeSection = (employeeId, sectionKey) => {
-  const normalizedSectionKey = `${sectionKey || ''}`.trim().toUpperCase()
+  const normalizedSectionKey = normalizeSectionKey(sectionKey)
   const currentAssignment = assignmentLookup.value[employeeId]
 
   if (!normalizedSectionKey) {
@@ -280,8 +561,31 @@ const setEmployeeSection = (employeeId, sectionKey) => {
   updateAssignment(employeeId, {
     employeeId,
     sectionKey: normalizedSectionKey,
+    floorCode: currentAssignment?.floorCode || floors.value[0] || 'P2',
     stationId: currentAssignment?.stationId || null,
+    detailKey: currentAssignment?.detailKey || '',
   })
+
+  if (requiresDetailSelection(normalizedSectionKey) || isQuantityStowSection(normalizedSectionKey)) {
+    openAssignmentPromptModal(employeeId, normalizedSectionKey)
+  }
+}
+
+const selectAssignmentDetail = (detailKey) => {
+  const employeeId = assignmentPromptState.employeeId
+  const currentAssignment = assignmentLookup.value[employeeId]
+
+  if (!employeeId || !currentAssignment) {
+    closeAssignmentPromptModal()
+    return
+  }
+
+  updateAssignment(employeeId, {
+    ...currentAssignment,
+    detailKey,
+    stationId: null,
+  })
+  closeAssignmentPromptModal()
 }
 
 const assignStationToEmployee = (employeeId, stationId) => {
@@ -290,6 +594,8 @@ const assignStationToEmployee = (employeeId, stationId) => {
   updateAssignment(employeeId, {
     employeeId,
     sectionKey: currentAssignment?.sectionKey || 'STOW',
+    floorCode: currentAssignment?.floorCode || floors.value[0] || 'P2',
+    detailKey: currentAssignment?.detailKey || '',
     stationId,
   })
 }
@@ -315,6 +621,12 @@ const requestStationAssignment = (employeeId, rawStationId) => {
   assignStationToEmployee(employeeId, stationId)
 }
 
+const selectQuantityStation = (stationId) => {
+  const employeeId = assignmentPromptState.employeeId
+  closeAssignmentPromptModal()
+  requestStationAssignment(employeeId, stationId)
+}
+
 const closeSwapModal = () => {
   pendingSwap.employeeId = null
   pendingSwap.targetStationId = null
@@ -333,7 +645,6 @@ const confirmStationSwap = () => {
   }
 
   const sourceAssignment = assignmentLookup.value[sourceEmployeeId]
-  const occupiedAssignment = assignmentLookup.value[occupiedEmployeeId]
   const previousStationId = sourceAssignment?.stationId || null
 
   assignStationToEmployee(sourceEmployeeId, targetStationId)
@@ -630,7 +941,7 @@ const deleteRoster = async (roster) => {
           <div>
             <p class="text-xl font-semibold text-slate-900">{{ editingRosterId ? 'Edit Roster' : 'Create Roster' }}</p>
             <p class="mt-1 text-sm text-slate-500">
-              All active associates start in `Stow` with random station IDs, then you can change section and station assignments below.
+              All active associates start equally divided across floors in `Stow` with random default stations, then you can move floor, section, role, and station assignments below.
             </p>
           </div>
           <button
@@ -757,7 +1068,7 @@ const deleteRoster = async (roster) => {
                 <article
                   v-for="employee in filteredEmployeeOptions"
                   :key="employee.id"
-                  class="grid gap-4 rounded-2xl border border-slate-200 px-4 py-3 xl:grid-cols-[1fr_180px_260px]"
+                  class="rounded-2xl border border-slate-200 px-4 py-4"
                 >
                   <div class="flex items-center gap-3">
                     <img
@@ -780,40 +1091,98 @@ const deleteRoster = async (roster) => {
                     </div>
                   </div>
 
-                  <label class="block">
-                    <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Section
-                    </span>
-                    <select
-                      :value="assignmentLookup[employee.id] || ''"
-                      class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none"
-                      @change="setEmployeeSection(employee.id, $event.target.value)"
-                    >
-                      <option value="">Not assigned</option>
-                      <option v-for="section in rosterSections" :key="section.key" :value="section.key">
-                        {{ section.label }}
-                      </option>
-                    </select>
-                  </label>
+                  <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <label class="block">
+                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        Floor
+                      </span>
+                      <select
+                        :value="assignmentLookup[employee.id]?.floorCode || ''"
+                        class="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                        @change="setEmployeeFloor(employee.id, $event.target.value)"
+                      >
+                        <option v-for="floor in floors" :key="floor" :value="floor">{{ floor }}</option>
+                      </select>
+                    </label>
 
-                  <label class="block">
-                    <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      Station ID
-                    </span>
-                    <select
-                      :value="assignmentLookup[employee.id]?.stationId || ''"
-                      class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none"
-                      @change="requestStationAssignment(employee.id, $event.target.value)"
-                    >
-                      <option value="">No station assigned</option>
-                      <option v-for="station in stations" :key="station.id" :value="station.id">
-                        {{ station.displayLabel }}
-                      </option>
-                    </select>
-                    <p class="mt-2 text-xs text-slate-400">
-                      {{ assignmentLookup[employee.id]?.stationId ? stationLookup[assignmentLookup[employee.id].stationId]?.displayLabel : 'Select a station from P2, P3, P4, or Far Away.' }}
-                    </p>
-                  </label>
+                    <label class="block">
+                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        Section
+                      </span>
+                      <select
+                        :value="assignmentLookup[employee.id]?.sectionKey || ''"
+                        class="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                        @change="setEmployeeSection(employee.id, $event.target.value)"
+                      >
+                        <option value="">Not assigned</option>
+                        <option v-for="section in rosterSections" :key="section.key" :value="section.key">
+                          {{ section.label }}
+                        </option>
+                      </select>
+                    </label>
+
+                    <div class="block">
+                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        Role / Task
+                      </span>
+                      <button
+                        v-if="requiresDetailSelection(assignmentLookup[employee.id]?.sectionKey) || isQuantityStowSection(assignmentLookup[employee.id]?.sectionKey)"
+                        type="button"
+                        @click="openAssignmentPromptModal(employee.id)"
+                        class="flex h-10 w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 text-left text-sm text-slate-700"
+                      >
+                        <span class="truncate">{{ getAssignmentDetailButtonLabel(employee.id) }}</span>
+                        <span class="material-symbols-outlined text-base text-slate-400">open_in_new</span>
+                      </button>
+                      <div
+                        v-else
+                        class="flex h-10 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
+                      >
+                        No extra role prompt
+                      </div>
+                    </div>
+
+                    <div class="block">
+                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        Station
+                      </span>
+                      <template
+                        v-if="
+                          supportsStationAssignment(assignmentLookup[employee.id]?.sectionKey) &&
+                          !isQuantityStowSection(assignmentLookup[employee.id]?.sectionKey)
+                        "
+                      >
+                        <select
+                          :value="assignmentLookup[employee.id]?.stationId || ''"
+                          class="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                          @change="requestStationAssignment(employee.id, $event.target.value)"
+                        >
+                          <option value="">No station assigned</option>
+                          <option
+                            v-for="station in getAllowedStationsForEmployee(employee.id)"
+                            :key="station.id"
+                            :value="station.id"
+                          >
+                            {{ station.displayLabel }}
+                          </option>
+                        </select>
+                      </template>
+                      <div
+                        v-else
+                        class="flex h-10 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
+                      >
+                        {{
+                          supportsStationAssignment(assignmentLookup[employee.id]?.sectionKey)
+                            ? 'Use the role/task button to choose the quantity station.'
+                            : 'No station for this section'
+                        }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-xs text-slate-500">
+                    {{ getAssignmentSummaryText(employee.id) }}
+                  </div>
                 </article>
 
                 <div
@@ -843,6 +1212,61 @@ const deleteRoster = async (roster) => {
           >
             {{ isSubmitting ? 'Saving...' : editingRosterId ? 'Update Roster' : 'Create Roster' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showAssignmentPromptModal"
+      class="fixed inset-0 z-[58] flex items-center justify-center bg-slate-950/50 px-4 py-4"
+    >
+      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">{{ assignmentPromptState.title }}</p>
+            <p class="mt-1 text-sm text-slate-500">{{ assignmentPromptState.description }}</p>
+          </div>
+          <button
+            type="button"
+            @click="closeAssignmentPromptModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div v-if="assignmentPromptState.mode === 'detail'" class="grid gap-3 sm:grid-cols-2">
+            <button
+              v-for="option in assignmentPromptState.options"
+              :key="option.key"
+              type="button"
+              @click="selectAssignmentDetail(option.key)"
+              class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left text-sm text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
+            >
+              <p class="font-semibold text-slate-900">{{ option.label }}</p>
+              <p class="mt-1 text-xs text-slate-500">Assign this role to the selected associate.</p>
+            </button>
+          </div>
+
+          <div v-else-if="assignmentPromptState.mode === 'station'" class="grid gap-3 sm:grid-cols-2">
+            <button
+              v-for="station in assignmentPromptState.options"
+              :key="station.id"
+              type="button"
+              @click="selectQuantityStation(station.id)"
+              class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left text-sm text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
+            >
+              <p class="font-semibold text-slate-900">{{ station.displayLabel }}</p>
+              <p class="mt-1 text-xs text-slate-500">Choose this quantity station for the selected associate.</p>
+            </button>
+            <div
+              v-if="!assignmentPromptState.options.length"
+              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 sm:col-span-2"
+            >
+              No Quantity Stow stations are available on the selected floor yet.
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -880,7 +1304,7 @@ const deleteRoster = async (roster) => {
                   <span class="mb-2 block text-sm text-slate-600">Station Type</span>
                   <select v-model="stationForm.stationType" class="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none">
                     <option v-for="stationType in stationTypes" :key="stationType" :value="stationType">
-                      {{ stationType === 'AR' ? 'AR Station' : 'Universal Station' }}
+                      {{ formatStationTypeLabel(stationType) }}
                     </option>
                   </select>
                 </label>

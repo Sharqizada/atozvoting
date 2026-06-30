@@ -9,14 +9,37 @@ const decodeNfcRecord = (record) => {
     return ''
   }
 
+  const binaryData = record.data instanceof DataView ? new Uint8Array(record.data.buffer) : new Uint8Array(record.data)
+
   try {
-    return normalizeNfcValue(new TextDecoder(record.encoding || 'utf-8').decode(record.data))
+    return normalizeNfcValue(new TextDecoder(record.encoding || 'utf-8').decode(binaryData))
   } catch {
     try {
-      return normalizeNfcValue(new TextDecoder().decode(record.data))
+      return normalizeNfcValue(new TextDecoder().decode(binaryData))
     } catch {
       return ''
     }
+  }
+}
+
+const bufferToHex = (value) =>
+  Array.from(value || [])
+    .map((entry) => entry.toString(16).padStart(2, '0'))
+    .join('')
+
+const expandNfcCandidate = (candidate, bucket) => {
+  const normalizedCandidate = normalizeNfcValue(candidate)
+
+  if (!normalizedCandidate) {
+    return
+  }
+
+  bucket.push(normalizedCandidate)
+
+  const digitsOnly = normalizedCandidate.replace(/[^0-9]/g, '')
+
+  if (digitsOnly && digitsOnly !== normalizedCandidate) {
+    bucket.push(digitsOnly)
   }
 }
 
@@ -26,17 +49,23 @@ const extractBadgeIdFromEvent = (event) => {
   for (const record of event.message?.records || []) {
     const decodedValue = decodeNfcRecord(record)
 
-    if (decodedValue) {
-      candidates.push(decodedValue)
+    expandNfcCandidate(decodedValue, candidates)
+
+    if (record?.data) {
+      const binaryData =
+        record.data instanceof DataView ? new Uint8Array(record.data.buffer) : new Uint8Array(record.data)
+      const hexValue = bufferToHex(binaryData)
+
+      expandNfcCandidate(hexValue, candidates)
     }
   }
 
-  if (event.serialNumber) {
-    candidates.push(normalizeNfcValue(event.serialNumber))
-  }
+  expandNfcCandidate(event.serialNumber, candidates)
+  expandNfcCandidate(event.message?.serialNumber, candidates)
 
   return (
-    candidates.find((candidate) => /^\d+$/.test(candidate.replace(/\s+/g, ''))) ||
+    candidates.find((candidate) => /^\d+$/.test(candidate)) ||
+    candidates.find((candidate) => /^[a-f0-9]+$/i.test(candidate)) ||
     candidates.find(Boolean) ||
     ''
   )

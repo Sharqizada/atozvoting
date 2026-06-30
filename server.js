@@ -4528,11 +4528,51 @@ const ROSTER_V2_SECTIONS = Object.freeze([
 ])
 const rosterV2SectionLabelMap = new Map(ROSTER_V2_SECTIONS.map((section) => [section.key, section.label]))
 const STATION_V2_FLOORS = Object.freeze(['P2', 'P3', 'P4'])
-const STATION_V2_TYPES = Object.freeze(['AR', 'UNIVERSAL'])
+const STATION_V2_TYPES = Object.freeze(['AR', 'UNIVERSAL', 'QUANTITY_STOW'])
+const ROSTER_V2_STATION_SECTIONS = new Set(['STOW', 'CUBISCAN', 'QUANTITY_STOW'])
+const ROSTER_V2_DETAIL_OPTIONS = Object.freeze({
+  ISS: [
+    { key: 'RECEIVE_ANDON', label: 'Receive Andon' },
+    { key: 'IOL_FUD', label: 'IOL/FUD' },
+    { key: 'STOW_ANDON_P2', label: 'Stow Andon P2' },
+    { key: 'STOW_ANDON_P3', label: 'Stow Andon P3' },
+    { key: 'STOW_ANDON_P4', label: 'Stow Andon P4' },
+    { key: 'TICKETLAND', label: 'TicketLand' },
+    { key: 'TICKETS', label: 'Tickets' },
+    { key: 'ILACS', label: 'ILACS' },
+  ],
+  WATER_SPIDER: [
+    { key: 'P2_WATER_SPIDER', label: 'P2 Water Spider' },
+    { key: 'P2_SOUTH_CART_RUNNER', label: 'P2 South Cart Runner' },
+    { key: 'P2_NORTH_DOWNSTACK', label: 'P2 North Downstack' },
+    { key: 'P3_WATER_SPIDER', label: 'P3 Water Spider' },
+    { key: 'P3_SOUTH_CART_RUNNER', label: 'P3 South Cart Runner' },
+    { key: 'P3_NORTH_DOWNSTACK', label: 'P3 North Downstack' },
+    { key: 'P4_WATER_SPIDER', label: 'P4 Water Spider' },
+    { key: 'P4_SOUTH_CART_RUNNER', label: 'P4 South Cart Runner' },
+    { key: 'P4_NORTH_DOWNSTACK', label: 'P4 North Downstack' },
+  ],
+})
+const rosterV2DetailLabelMap = new Map(
+  Object.values(ROSTER_V2_DETAIL_OPTIONS)
+    .flat()
+    .map((option) => [option.key, option.label]),
+)
 const normalizeRosterV2SectionKey = (value) => {
   const normalized = `${value || ''}`.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')
   return rosterV2SectionLabelMap.has(normalized) ? normalized : ''
 }
+const normalizeRosterV2Floor = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  return STATION_V2_FLOORS.includes(normalized) ? normalized : ''
+}
+const normalizeRosterV2DetailKey = (sectionKey, value) => {
+  const normalizedSectionKey = normalizeRosterV2SectionKey(sectionKey)
+  const normalizedValue = `${value || ''}`.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+  const supportedOptions = ROSTER_V2_DETAIL_OPTIONS[normalizedSectionKey] || []
+  return supportedOptions.some((option) => option.key === normalizedValue) ? normalizedValue : ''
+}
+const getRosterV2DetailLabel = (value) => rosterV2DetailLabelMap.get(`${value || ''}`.trim().toUpperCase()) || ''
 const normalizeStationV2Floor = (value) => {
   const normalized = `${value || ''}`.trim().toUpperCase()
   return STATION_V2_FLOORS.includes(normalized) ? normalized : ''
@@ -4547,6 +4587,15 @@ const normalizeStationV2Type = (value) => {
     return 'UNIVERSAL'
   }
 
+  if (
+    normalized === 'QUANTITY_STOW' ||
+    normalized === 'QUANTITY_STOW_STATION' ||
+    normalized === 'QUANTITY' ||
+    normalized === 'QUANTITY_STATION'
+  ) {
+    return 'QUANTITY_STOW'
+  }
+
   return ''
 }
 const formatStationV2Payload = (row) => ({
@@ -4556,7 +4605,7 @@ const formatStationV2Payload = (row) => ({
   stationType: row.station_type,
   isFarAway: Boolean(row.is_far_away),
   label: `${row.floor_code} - ${row.station_code}`,
-  displayLabel: `${row.floor_code} - ${row.station_code} Â· ${row.station_type}${row.is_far_away ? ' Â· Far Away' : ''}`,
+  displayLabel: `${row.floor_code} - ${row.station_code} | ${row.station_type}${row.is_far_away ? ' | Far Away' : ''}`,
 })
 
 const ensureRosterStationV2Schema = async () => {
@@ -4573,6 +4622,8 @@ const ensureRosterStationV2Schema = async () => {
     )
   `)
   await ensureColumn('roster_assignments', 'station_id INT NULL AFTER section_key')
+  await ensureColumn('roster_assignments', 'floor_code VARCHAR(10) NULL AFTER station_id')
+  await ensureColumn('roster_assignments', 'detail_key VARCHAR(80) NULL AFTER floor_code')
 }
 
 const getStationsV2 = async () => {
@@ -4609,6 +4660,8 @@ const getRosterAssignmentsV2 = async (rosterIds) => {
         roster_assignments.roster_id,
         roster_assignments.section_key,
         roster_assignments.station_id,
+        roster_assignments.floor_code AS assignment_floor_code,
+        roster_assignments.detail_key,
         employees.id,
         employees.badge_id,
         employees.full_name,
@@ -4642,6 +4695,9 @@ const buildRosterV2Sections = (assignmentRows = []) =>
         departmentName: row.department_name,
         roleName: row.role_name,
         photoData: row.photo_data || '',
+        floorCode: normalizeRosterV2Floor(row.assignment_floor_code || row.floor_code || '') || '',
+        detailKey: row.detail_key || '',
+        detailLabel: getRosterV2DetailLabel(row.detail_key),
         stationId: row.station_id || null,
         stationFloorCode: row.floor_code || '',
         stationCode: row.station_code || '',
@@ -4649,7 +4705,7 @@ const buildRosterV2Sections = (assignmentRows = []) =>
         isFarAwayStation: Boolean(row.is_far_away),
         stationLabel: row.station_id ? `${row.floor_code} - ${row.station_code}` : '',
         stationDisplayLabel: row.station_id
-          ? `${row.floor_code} - ${row.station_code} Â· ${row.station_type}${row.is_far_away ? ' Â· Far Away' : ''}`
+          ? `${row.floor_code} - ${row.station_code} | ${row.station_type}${row.is_far_away ? ' | Far Away' : ''}`
           : '',
       })),
   }))
@@ -4688,6 +4744,8 @@ const parseRosterAssignmentsV2 = (assignments) => {
     const employeeId = Number(entry?.employeeId)
     const sectionKey = normalizeRosterV2SectionKey(entry?.sectionKey)
     const stationId = Number(entry?.stationId) || null
+    const floorCode = normalizeRosterV2Floor(entry?.floorCode)
+    const detailKey = normalizeRosterV2DetailKey(sectionKey, entry?.detailKey)
 
     if (!employeeId || !sectionKey) {
       return
@@ -4697,6 +4755,8 @@ const parseRosterAssignmentsV2 = (assignments) => {
       employeeId,
       sectionKey,
       stationId,
+      floorCode,
+      detailKey,
     })
   })
 
@@ -4722,6 +4782,12 @@ const validateRosterAssignmentsV2 = async (assignments) => {
     throw new Error('Only active associates can be assigned to a roster.')
   }
 
+  const invalidFloorAssignment = assignments.find((assignment) => !normalizeRosterV2Floor(assignment.floorCode))
+
+  if (invalidFloorAssignment) {
+    throw new Error('Each associate must be assigned to a valid floor.')
+  }
+
   const stationIds = assignments.map((assignment) => assignment.stationId).filter(Boolean)
   const uniqueStationIds = Array.from(new Set(stationIds))
 
@@ -4729,22 +4795,63 @@ const validateRosterAssignmentsV2 = async (assignments) => {
     throw new Error('Each station can only be assigned to one associate at a time.')
   }
 
-  if (!uniqueStationIds.length) {
-    return
-  }
-
-  const stationRows = await query(
-    `
-      SELECT id
-      FROM stations
-      WHERE id IN (?)
-    `,
-    [uniqueStationIds],
-  )
+  const stationRows = uniqueStationIds.length
+    ? await query(
+        `
+          SELECT id, floor_code, station_type, is_far_away
+          FROM stations
+          WHERE id IN (?)
+        `,
+        [uniqueStationIds],
+      )
+    : []
 
   if (stationRows.length !== uniqueStationIds.length) {
     throw new Error('One or more selected stations no longer exist.')
   }
+
+  const stationMap = new Map(stationRows.map((row) => [row.id, row]))
+
+  assignments.forEach((assignment) => {
+    const sectionKey = normalizeRosterV2SectionKey(assignment.sectionKey)
+    const stationRow = assignment.stationId ? stationMap.get(assignment.stationId) : null
+    const needsDetail = Array.isArray(ROSTER_V2_DETAIL_OPTIONS[sectionKey])
+    const supportsStation = ROSTER_V2_STATION_SECTIONS.has(sectionKey)
+
+    if (needsDetail && !normalizeRosterV2DetailKey(sectionKey, assignment.detailKey)) {
+      throw new Error(`${rosterV2SectionLabelMap.get(sectionKey)} requires a valid role selection.`)
+    }
+
+    if (!needsDetail && assignment.detailKey) {
+      throw new Error(`${rosterV2SectionLabelMap.get(sectionKey)} cannot keep a role assignment.`)
+    }
+
+    if (!supportsStation && assignment.stationId) {
+      throw new Error(`${rosterV2SectionLabelMap.get(sectionKey)} does not use station assignments.`)
+    }
+
+    if (sectionKey === 'QUANTITY_STOW' && !assignment.stationId) {
+      throw new Error('Quantity Stow requires a quantity station for every associate.')
+    }
+
+    if (!stationRow) {
+      return
+    }
+
+    if (normalizeRosterV2Floor(assignment.floorCode) !== normalizeStationV2Floor(stationRow.floor_code)) {
+      throw new Error('An associate can only use a station from the same floor assignment.')
+    }
+
+    const normalizedStationType = normalizeStationV2Type(stationRow.station_type)
+
+    if (sectionKey === 'QUANTITY_STOW' && normalizedStationType !== 'QUANTITY_STOW') {
+      throw new Error('Quantity Stow associates can only use Quantity Stow stations.')
+    }
+
+    if (sectionKey !== 'QUANTITY_STOW' && normalizedStationType === 'QUANTITY_STOW') {
+      throw new Error('Quantity Stow stations are reserved for Quantity Stow associates only.')
+    }
+  })
 }
 
 const syncRosterAssignmentsV2 = async (rosterId, assignments, runner = pool) => {
@@ -4757,7 +4864,7 @@ const syncRosterAssignmentsV2 = async (rosterId, assignments, runner = pool) => 
 
   await chunkInsert(
     `
-      INSERT INTO roster_assignments (roster_id, employee_id, section_key, station_id)
+      INSERT INTO roster_assignments (roster_id, employee_id, section_key, station_id, floor_code, detail_key)
       VALUES ?
     `,
     assignments.map((assignment) => [
@@ -4765,6 +4872,8 @@ const syncRosterAssignmentsV2 = async (rosterId, assignments, runner = pool) => 
       assignment.employeeId,
       assignment.sectionKey,
       assignment.stationId,
+      assignment.floorCode,
+      assignment.detailKey || null,
     ]),
     500,
     runner,
@@ -4913,6 +5022,7 @@ app.get('/api/rosters-v2', async (_req, res) => {
       ],
       rosters,
       rosterSections: ROSTER_V2_SECTIONS,
+      sectionDetailOptions: ROSTER_V2_DETAIL_OPTIONS,
       floors: STATION_V2_FLOORS,
       stationTypes: STATION_V2_TYPES,
       stations: stationRows.map(formatStationV2Payload),

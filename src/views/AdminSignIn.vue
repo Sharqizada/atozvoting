@@ -460,8 +460,10 @@ const readBadgeWithNfc = async () => {
       },
     })
 
-    badgeCode.value = scannedBadgeId
+    badgeCode.value = `${scannedBadgeId || ''}`.trim()
+    successMessage.value = `NFC detected: ${badgeCode.value}`
     detectedAdmin.value = null
+    await nextTick()
     await playScanBeep()
     await verifyBadge('nfc')
   } catch (error) {
