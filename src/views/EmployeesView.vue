@@ -4,7 +4,7 @@ import AdminShell from '../components/AdminShell.vue'
 import { useAdminPage } from '../composables/useAdminPage'
 import { deleteJson, postJson, putJson } from '../lib/api'
 
-const { data, error, load } = useAdminPage('/api/employees', {
+const { data, error, load } = useAdminPage('/api/employees-v2', {
   stats: [],
   employees: [],
   pagination: {
@@ -21,8 +21,11 @@ const editingEmployeeId = ref(null)
 const submitError = ref('')
 const submitSuccess = ref('')
 const isSubmitting = ref(false)
+const isImporting = ref(false)
+const importInputRef = ref(null)
 const createForm = reactive({
   badgeId: '',
+  badgeUsername: '',
   fullName: '',
   departmentName: 'Inbound Stow',
   roleName: 'Stower',
@@ -35,7 +38,7 @@ const createForm = reactive({
 const filteredEmployees = computed(() =>
   employees.value.filter((employee) => {
     const haystack =
-      `${employee.badgeId} ${employee.fullName} ${employee.departmentName} ${employee.roleName} ${employee.email}`.toLowerCase()
+      `${employee.badgeId} ${employee.badgeUsername || ''} ${employee.fullName} ${employee.departmentName} ${employee.roleName} ${employee.email}`.toLowerCase()
     const matchesSearch = !searchTerm.value || haystack.includes(searchTerm.value.toLowerCase())
     const matchesStatus = statusFilter.value === 'ALL' || employee.employmentStatus === statusFilter.value
     return matchesSearch && matchesStatus
@@ -46,6 +49,7 @@ const paginationLabel = computed(() => `Showing 1 to ${filteredEmployees.value.l
 
 const resetForm = () => {
   createForm.badgeId = ''
+  createForm.badgeUsername = ''
   createForm.fullName = ''
   createForm.departmentName = 'Inbound Stow'
   createForm.roleName = 'Stower'
@@ -68,6 +72,7 @@ const openEditModal = (employee) => {
   submitSuccess.value = ''
   editingEmployeeId.value = employee.id
   createForm.badgeId = employee.badgeId
+  createForm.badgeUsername = employee.badgeUsername || ''
   createForm.fullName = employee.fullName
   createForm.departmentName = employee.departmentName
   createForm.roleName = employee.roleName
@@ -114,10 +119,10 @@ const submitEmployee = async () => {
 
   try {
     if (editingEmployeeId.value) {
-      await putJson(`/api/employees/${editingEmployeeId.value}`, { ...createForm })
+      await putJson(`/api/employees-v2/${editingEmployeeId.value}`, { ...createForm })
       submitSuccess.value = 'Associate updated successfully.'
     } else {
-      await postJson('/api/employees', { ...createForm })
+      await postJson('/api/employees-v2', { ...createForm })
       submitSuccess.value = 'Associate added successfully.'
     }
     await load()
@@ -138,11 +143,133 @@ const deleteEmployee = async (employee) => {
   }
 
   try {
-    await deleteJson(`/api/employees/${employee.id}`)
+    await deleteJson(`/api/employees-v2/${employee.id}`)
     submitSuccess.value = 'Associate deleted successfully.'
     await load()
   } catch (requestError) {
     submitError.value = requestError.message || 'Unable to delete associate.'
+  }
+}
+
+const normalizeImportHeader = (value) =>
+  `${value || ''}`
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+
+const getImportValue = (row, aliases) => {
+  const normalizedAliasSet = new Set(aliases.map(normalizeImportHeader))
+  const entry = Object.entries(row).find(([key]) => normalizedAliasSet.has(normalizeImportHeader(key)))
+  return `${entry?.[1] ?? ''}`.trim()
+}
+
+const triggerImportPicker = () => {
+  submitError.value = ''
+  submitSuccess.value = ''
+  importInputRef.value?.click()
+}
+
+const downloadExampleFile = async () => {
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.utils.book_new()
+  const worksheet = XLSX.utils.json_to_sheet([
+    {
+      'Badge ID': '15357920',
+      'Badge User Name': 'jdoe',
+      'Full Name': 'Jane Doe',
+      Department: 'Inbound Stow',
+      Role: 'Stower',
+      Email: 'jane.doe@example.com',
+      Status: 'ACTIVE',
+      'Join Date': '2026-06-30',
+    },
+  ])
+
+  worksheet['!cols'] = [
+    { wch: 14 },
+    { wch: 22 },
+    { wch: 24 },
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 30 },
+    { wch: 12 },
+    { wch: 14 },
+  ]
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Associates')
+  XLSX.writeFile(workbook, 'associate-import-example.xlsx')
+}
+
+const handleImportSelected = async (event) => {
+  const [file] = event.target.files || []
+
+  if (!file) {
+    return
+  }
+
+  submitError.value = ''
+  submitSuccess.value = ''
+  isImporting.value = true
+
+  try {
+    const XLSX = await import('xlsx')
+    const buffer = await file.arrayBuffer()
+    const workbook = XLSX.read(buffer, { type: 'array' })
+    const firstSheetName = workbook.SheetNames[0]
+    const worksheet = workbook.Sheets[firstSheetName]
+
+    if (!worksheet) {
+      throw new Error('The Excel file does not contain any worksheet.')
+    }
+
+    const rawRows = XLSX.utils.sheet_to_json(worksheet, {
+      defval: '',
+      raw: false,
+      dateNF: 'yyyy-mm-dd',
+    })
+
+    if (!rawRows.length) {
+      throw new Error('The Excel file does not contain any associate rows.')
+    }
+
+    const rows = rawRows
+      .map((row) => ({
+        badgeId: getImportValue(row, ['Badge ID']),
+        badgeUsername: getImportValue(row, ['Badge User Name', 'Badge Username', 'User Name']),
+        fullName: getImportValue(row, ['Full Name', 'Associate Name', 'Name']),
+        departmentName: getImportValue(row, ['Department', 'Department Name']),
+        roleName: getImportValue(row, ['Role', 'Role Name']),
+        email: getImportValue(row, ['Email', 'Email Address']),
+        employmentStatus: getImportValue(row, ['Status', 'Employment Status']),
+        joinDate: getImportValue(row, ['Join Date', 'Start Date']),
+      }))
+      .filter((row) =>
+        [
+          row.badgeId,
+          row.badgeUsername,
+          row.fullName,
+          row.departmentName,
+          row.roleName,
+          row.email,
+          row.employmentStatus,
+          row.joinDate,
+        ].some(Boolean),
+      )
+
+    if (!rows.length) {
+      throw new Error('The Excel file does not contain any usable associate rows.')
+    }
+
+    const response = await postJson('/api/employees-v2/import', { rows })
+    submitSuccess.value =
+      response.message ||
+      `Excel import finished successfully. ${response.createdCount || 0} associates created and ${response.updatedCount || 0} associates updated.`
+    await load()
+  } catch (requestError) {
+    submitError.value = requestError.message || 'Unable to import associates from Excel.'
+  } finally {
+    isImporting.value = false
+    event.target.value = ''
   }
 }
 </script>
@@ -182,6 +309,13 @@ const deleteEmployee = async (employee) => {
         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <p class="text-lg font-semibold text-slate-900">All Associates</p>
           <div class="flex flex-wrap items-center gap-3">
+            <input
+              ref="importInputRef"
+              type="file"
+              accept=".xlsx,.xls"
+              class="hidden"
+              @change="handleImportSelected"
+            />
             <div class="relative">
               <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-lg text-slate-400">search</span>
               <input
@@ -199,6 +333,23 @@ const deleteEmployee = async (employee) => {
                 <option value="INACTIVE">Inactive</option>
               </select>
             </label>
+            <button
+              type="button"
+              @click="triggerImportPicker"
+              :disabled="isImporting"
+              class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 disabled:opacity-60"
+            >
+              <span class="material-symbols-outlined text-base">upload_file</span>
+              {{ isImporting ? 'Importing...' : 'Import Excel' }}
+            </button>
+            <button
+              type="button"
+              @click="downloadExampleFile"
+              class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600"
+            >
+              <span class="material-symbols-outlined text-base">download</span>
+              Download Example
+            </button>
             <button type="button" @click="openCreateModal" class="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white">
               <span class="material-symbols-outlined text-base">add</span>
               Add Associate
@@ -213,6 +364,7 @@ const deleteEmployee = async (employee) => {
             <tr class="border-b border-slate-200 bg-slate-50 text-slate-500">
               <th class="px-5 py-4 font-medium">#</th>
               <th class="px-4 py-4 font-medium">Badge ID</th>
+              <th class="px-4 py-4 font-medium">Badge User Name</th>
               <th class="px-4 py-4 font-medium">Associate</th>
               <th class="px-4 py-4 font-medium">Department / Role</th>
               <th class="px-4 py-4 font-medium">Status</th>
@@ -229,6 +381,7 @@ const deleteEmployee = async (employee) => {
             >
               <td class="px-5 py-4 text-slate-500">{{ index + 1 }}</td>
               <td class="px-4 py-4 text-slate-600">{{ employee.badgeId }}</td>
+              <td class="px-4 py-4 text-slate-600">{{ employee.badgeUsername || '-' }}</td>
               <td class="px-4 py-4">
                 <div class="flex items-center gap-3">
                   <img
@@ -272,7 +425,7 @@ const deleteEmployee = async (employee) => {
               </td>
             </tr>
             <tr v-if="!filteredEmployees.length">
-              <td colspan="8" class="px-5 py-10 text-center text-sm text-slate-500">
+              <td colspan="9" class="px-5 py-10 text-center text-sm text-slate-500">
                 No associates found for the current filters.
               </td>
             </tr>
@@ -342,6 +495,10 @@ const deleteEmployee = async (employee) => {
             <label class="block">
               <span class="mb-2 block text-sm text-slate-600">Full Name</span>
               <input v-model="createForm.fullName" type="text" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
+            </label>
+            <label class="block">
+              <span class="mb-2 block text-sm text-slate-600">Badge User Name</span>
+              <input v-model="createForm.badgeUsername" type="text" class="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none" />
             </label>
             <label class="block">
               <span class="mb-2 block text-sm text-slate-600">Department</span>

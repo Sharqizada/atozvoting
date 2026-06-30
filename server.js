@@ -4162,3 +4162,358 @@ startServer().catch((error) => {
   console.error('Failed to start Voting System API:', error)
   process.exit(1)
 })
+
+
+const normalizeEmployeeV2JoinDateInput = (value) => {
+  const trimmed = `${value || ''}`.trim()
+
+  if (!trimmed) {
+    return ''
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed
+  }
+
+  const normalizedValue = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T')
+  const parsedDate = new Date(normalizedValue)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return ''
+  }
+
+  return formatDateValue(parsedDate)
+}
+
+const normalizeEmployeeV2Status = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  return ['ACTIVE', 'INACTIVE'].includes(normalized) ? normalized : 'ACTIVE'
+}
+
+const mapEmployeeV2Payload = (row) => ({
+  id: row.id,
+  badgeId: row.badge_id,
+  badgeUsername: row.badge_username || '',
+  fullName: row.full_name,
+  departmentName: row.department_name,
+  roleName: row.role_name,
+  employmentStatus: row.employment_status,
+  joinDateLabel: formatDateLabel(row.join_date),
+  email: row.email,
+  joinDateValue: formatDateValue(row.join_date),
+  photoData: row.photo_data,
+})
+
+const ensureEmployeeV2Schema = async () => {
+  await ensureColumn('employees', 'badge_username VARCHAR(120) NULL AFTER badge_id')
+}
+
+void ensureEmployeeV2Schema().catch((error) => {
+  console.error('Unable to prepare employee v2 schema:', error)
+})
+
+app.get('/api/employees-v2', async (_req, res) => {
+  try {
+    await ensureEmployeeV2Schema()
+    const rows = await query('SELECT * FROM employees ORDER BY id ASC')
+    const activeCount = rows.filter((row) => row.employment_status === 'ACTIVE').length
+    const votedRows = await query(
+      `
+        SELECT COUNT(DISTINCT voter_employee_id) AS voted_count
+        FROM votes
+      `,
+    )
+
+    return res.json({
+      stats: [
+        { title: 'Total Associates', value: formatNumber(rows.length), note: 'All associates', icon: 'group', panel: 'bg-blue-50', iconBg: 'bg-blue-600' },
+        { title: 'Active Associates', value: formatNumber(activeCount), note: `${formatPercent(activeCount, rows.length)} of total`, icon: 'task_alt', panel: 'bg-emerald-50', iconBg: 'bg-emerald-500' },
+        { title: 'Inactive Associates', value: formatNumber(rows.length - activeCount), note: `${formatPercent(rows.length - activeCount, rows.length)} of total`, icon: 'pause_circle', panel: 'bg-amber-50', iconBg: 'bg-amber-500' },
+        { title: 'Associates Voted', value: formatNumber(votedRows[0]?.voted_count || 0), note: 'In current round', icon: 'work', panel: 'bg-violet-50', iconBg: 'bg-violet-500' },
+      ],
+      employees: rows.map(mapEmployeeV2Payload),
+      pagination: {
+        showing: `Showing 1 to ${rows.length} of ${rows.length} associates`,
+      },
+    })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to load associates.', error: error.message })
+  }
+})
+
+app.post('/api/employees-v2', async (req, res) => {
+  const badgeId = req.body?.badgeId?.trim()
+  const badgeUsername = req.body?.badgeUsername?.trim() || ''
+  const fullName = req.body?.fullName?.trim()
+  const departmentName = req.body?.departmentName?.trim()
+  const roleName = req.body?.roleName?.trim()
+  const email = req.body?.email?.trim()
+  const employmentStatus = normalizeEmployeeV2Status(req.body?.employmentStatus)
+  const joinDate = normalizeEmployeeV2JoinDateInput(req.body?.joinDate)
+  let photoData = null
+
+  try {
+    await ensureEmployeeV2Schema()
+    photoData = sanitizePhotoData(req.body?.photoData)
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Invalid associate photo.' })
+  }
+
+  if (!badgeId || !fullName || !departmentName || !roleName || !email || !joinDate) {
+    return res.status(400).json({ message: 'All associate fields are required.' })
+  }
+
+  if (!/^\d+$/.test(badgeId)) {
+    return res.status(400).json({ message: 'Badge ID must contain digits only.' })
+  }
+
+  try {
+    await execute(
+      `
+        INSERT INTO employees
+        (badge_id, badge_username, full_name, department_name, role_name, email, photo_data, employment_status, join_date, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `,
+      [badgeId, badgeUsername, fullName, departmentName, roleName, email, photoData, employmentStatus, joinDate],
+    )
+
+    return res.json({ success: true, message: 'Associate created successfully.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to create associate.', error: error.message })
+  }
+})
+
+app.put('/api/employees-v2/:id', async (req, res) => {
+  const employeeId = Number(req.params.id)
+  const badgeId = req.body?.badgeId?.trim()
+  const badgeUsername = req.body?.badgeUsername?.trim() || ''
+  const fullName = req.body?.fullName?.trim()
+  const departmentName = req.body?.departmentName?.trim()
+  const roleName = req.body?.roleName?.trim()
+  const email = req.body?.email?.trim()
+  const employmentStatus = normalizeEmployeeV2Status(req.body?.employmentStatus)
+  const joinDate = normalizeEmployeeV2JoinDateInput(req.body?.joinDate)
+  let photoData = null
+
+  try {
+    await ensureEmployeeV2Schema()
+    photoData = sanitizePhotoData(req.body?.photoData)
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Invalid associate photo.' })
+  }
+
+  if (!employeeId || !badgeId || !fullName || !departmentName || !roleName || !email || !joinDate) {
+    return res.status(400).json({ message: 'All associate fields are required.' })
+  }
+
+  if (!/^\d+$/.test(badgeId)) {
+    return res.status(400).json({ message: 'Badge ID must contain digits only.' })
+  }
+
+  try {
+    await execute(
+      `
+        UPDATE employees
+        SET badge_id = ?, badge_username = ?, full_name = ?, department_name = ?, role_name = ?, email = ?, photo_data = ?, employment_status = ?, join_date = ?, updated_at = NOW()
+        WHERE id = ?
+      `,
+      [badgeId, badgeUsername, fullName, departmentName, roleName, email, photoData, employmentStatus, joinDate, employeeId],
+    )
+
+    return res.json({ success: true, message: 'Associate updated successfully.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to update associate.', error: error.message })
+  }
+})
+
+app.delete('/api/employees-v2/:id', async (req, res) => {
+  const employeeId = Number(req.params.id)
+
+  if (!employeeId) {
+    return res.status(400).json({ message: 'Valid associate id is required.' })
+  }
+
+  try {
+    const affectedRounds = await query(
+      `
+        SELECT DISTINCT voting_round_id
+        FROM voting_round_participants
+        WHERE employee_id = ?
+      `,
+      [employeeId],
+    )
+    await execute('DELETE FROM votes WHERE voter_employee_id = ? OR candidate_employee_id = ?', [employeeId, employeeId])
+    await execute('DELETE FROM voting_round_participants WHERE employee_id = ?', [employeeId])
+    await execute('DELETE FROM roster_assignments WHERE employee_id = ?', [employeeId])
+    await execute('DELETE FROM employees WHERE id = ?', [employeeId])
+
+    for (const round of affectedRounds) {
+      await recalculateRoundStats(round.voting_round_id)
+    }
+
+    return res.json({ success: true, message: 'Associate deleted successfully.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to delete associate.', error: error.message })
+  }
+})
+
+app.post('/api/employees-v2/import', async (req, res) => {
+  const incomingRows = Array.isArray(req.body?.rows) ? req.body.rows : []
+
+  if (!incomingRows.length) {
+    return res.status(400).json({ message: 'Add at least one associate row to import.' })
+  }
+
+  try {
+    await ensureEmployeeV2Schema()
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to prepare associates import.', error: error.message })
+  }
+
+  const rows = incomingRows
+    .map((entry, index) => ({
+      rowNumber: index + 2,
+      badgeId: `${entry?.badgeId || ''}`.trim(),
+      badgeUsername: `${entry?.badgeUsername || ''}`.trim(),
+      fullName: `${entry?.fullName || ''}`.trim(),
+      departmentName: `${entry?.departmentName || ''}`.trim(),
+      roleName: `${entry?.roleName || ''}`.trim(),
+      email: `${entry?.email || ''}`.trim(),
+      employmentStatus: normalizeEmployeeV2Status(entry?.employmentStatus),
+      joinDate: normalizeEmployeeV2JoinDateInput(entry?.joinDate),
+    }))
+    .filter((entry) =>
+      [
+        entry.badgeId,
+        entry.badgeUsername,
+        entry.fullName,
+        entry.departmentName,
+        entry.roleName,
+        entry.email,
+        entry.joinDate,
+      ].some(Boolean),
+    )
+
+  if (!rows.length) {
+    return res.status(400).json({ message: 'The Excel file does not contain any associate rows to import.' })
+  }
+
+  if (rows.length > 2000) {
+    return res.status(400).json({ message: 'Import up to 2000 associates per file.' })
+  }
+
+  const duplicateBadgeIds = rows.reduce((accumulator, row) => {
+    accumulator.set(row.badgeId, (accumulator.get(row.badgeId) || 0) + 1)
+    return accumulator
+  }, new Map())
+  const repeatedBadgeIds = Array.from(duplicateBadgeIds.entries())
+    .filter(([badgeId, count]) => badgeId && count > 1)
+    .map(([badgeId]) => badgeId)
+
+  if (repeatedBadgeIds.length) {
+    return res.status(400).json({
+      message: `Duplicate Badge ID values found in the Excel file: ${repeatedBadgeIds.slice(0, 10).join(', ')}`,
+    })
+  }
+
+  const invalidRow = rows.find(
+    (row) =>
+      !row.badgeId ||
+      !row.fullName ||
+      !row.departmentName ||
+      !row.roleName ||
+      !row.email ||
+      !row.joinDate ||
+      !/^\d+$/.test(row.badgeId),
+  )
+
+  if (invalidRow) {
+    return res.status(400).json({
+      message: `Row ${invalidRow.rowNumber} is invalid. Badge ID, Full Name, Department, Role, Email, and Join Date are required, and Badge ID must contain digits only.`,
+    })
+  }
+
+  try {
+    const badgeIds = rows.map((row) => row.badgeId)
+    const existingRows = await query(
+      `
+        SELECT id, badge_id
+        FROM employees
+        WHERE badge_id IN (?)
+      `,
+      [badgeIds],
+    )
+    const existingBadgeMap = new Map(existingRows.map((row) => [row.badge_id, row.id]))
+    let createdCount = 0
+    let updatedCount = 0
+    const connection = await pool.getConnection()
+
+    try {
+      await connection.beginTransaction()
+
+      for (const row of rows) {
+        const existingEmployeeId = existingBadgeMap.get(row.badgeId)
+
+        if (existingEmployeeId) {
+          await executeWith(
+            connection,
+            `
+              UPDATE employees
+              SET badge_username = ?, full_name = ?, department_name = ?, role_name = ?, email = ?, employment_status = ?, join_date = ?, updated_at = NOW()
+              WHERE id = ?
+            `,
+            [
+              row.badgeUsername,
+              row.fullName,
+              row.departmentName,
+              row.roleName,
+              row.email,
+              row.employmentStatus,
+              row.joinDate,
+              existingEmployeeId,
+            ],
+          )
+          updatedCount += 1
+          continue
+        }
+
+        await executeWith(
+          connection,
+          `
+            INSERT INTO employees
+            (badge_id, badge_username, full_name, department_name, role_name, email, photo_data, employment_status, join_date, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NOW())
+          `,
+          [
+            row.badgeId,
+            row.badgeUsername,
+            row.fullName,
+            row.departmentName,
+            row.roleName,
+            row.email,
+            row.employmentStatus,
+            row.joinDate,
+          ],
+        )
+        createdCount += 1
+      }
+
+      await connection.commit()
+      return res.json({
+        success: true,
+        createdCount,
+        updatedCount,
+        totalCount: rows.length,
+        message: `Excel import finished successfully. ${createdCount} associates created and ${updatedCount} associates updated.`,
+      })
+    } catch (error) {
+      await connection.rollback().catch(() => {})
+      return res.status(500).json({ message: 'Unable to import associates.', error: error.message })
+    } finally {
+      connection.release()
+    }
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to import associates.', error: error.message })
+  }
+})
+
