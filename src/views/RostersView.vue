@@ -34,7 +34,7 @@ const employeeSearch = ref('')
 const showCreateModal = ref(false)
 const showStationsModal = ref(false)
 const showStationListModal = ref(false)
-const showAssignmentPromptModal = ref(false)
+const showAssignmentEditorModal = ref(false)
 const showSectionSummaryModal = ref(false)
 const showSwapModal = ref(false)
 const editingRosterId = ref(null)
@@ -67,13 +67,8 @@ const stationListModalState = reactive({
   emptyMessage: '',
   stations: [],
 })
-const assignmentPromptState = reactive({
+const assignmentEditorState = reactive({
   employeeId: null,
-  sectionKey: '',
-  mode: 'detail',
-  title: '',
-  description: '',
-  options: [],
 })
 const sectionSummaryModalState = reactive({
   sectionKey: '',
@@ -117,6 +112,8 @@ const assignmentLookup = computed(() =>
     return accumulator
   }, {}),
 )
+const activeAssignmentEmployee = computed(() => employeeLookup.value[assignmentEditorState.employeeId] || null)
+const activeAssignment = computed(() => assignmentLookup.value[assignmentEditorState.employeeId] || null)
 
 const stationOccupancyLookup = computed(() =>
   createForm.assignments.reduce((accumulator, assignment) => {
@@ -181,6 +178,11 @@ const normalizeSectionKey = (value) => `${value || ''}`.trim().toUpperCase()
 const normalizeFloorCode = (value) => {
   const normalized = `${value || ''}`.trim().toUpperCase()
   return floors.value.includes(normalized) ? normalized : ''
+}
+const inferFloorCodeFromDetailKey = (detailKey) => {
+  const normalizedDetailKey = `${detailKey || ''}`.trim().toUpperCase()
+  const matchedFloor = normalizedDetailKey.match(/P[234]/)?.[0]
+  return normalizeFloorCode(matchedFloor)
 }
 const isQuantityStowSection = (sectionKey) => normalizeSectionKey(sectionKey) === 'QUANTITY_STOW'
 const supportsStationAssignment = (sectionKey) =>
@@ -285,48 +287,24 @@ const sanitizeAssignment = (assignment) => {
     detailKey,
   }
 }
-const getAssignmentDetailButtonLabel = (employeeId) => {
-  const assignment = assignmentLookup.value[employeeId]
-
-  if (!assignment?.sectionKey) {
-    return 'Choose'
-  }
-
-  if (requiresDetailSelection(assignment.sectionKey)) {
-    return (
-      getSectionDetailOptions(assignment.sectionKey).find((option) => option.key === assignment.detailKey)?.label ||
-      'Choose role'
-    )
-  }
-
-  return 'No prompt required'
-}
-const getAssignmentSummaryText = (employeeId) => {
-  const assignment = assignmentLookup.value[employeeId]
-
-  if (!assignment?.sectionKey) {
-    return 'Not assigned yet.'
-  }
-
-  if (requiresDetailSelection(assignment.sectionKey)) {
-    return (
-      getSectionDetailOptions(assignment.sectionKey).find((option) => option.key === assignment.detailKey)?.label ||
-      'Choose a role for this associate.'
-    )
-  }
-
-  if (assignment.stationId) {
-    return stationLookup.value[assignment.stationId]?.displayLabel || 'Station selected.'
-  }
-
-  if (assignment.floorCode) {
-    return `Assigned to ${assignment.floorCode}`
-  }
-
-  return 'No extra assignment yet.'
-}
 const getSectionDetailLabel = (sectionKey, detailKey) =>
   getSectionDetailOptions(sectionKey).find((option) => option.key === detailKey)?.label || detailKey || ''
+const getAssignmentStationLabel = (assignment) =>
+  assignment?.stationId ? stationLookup.value[assignment.stationId]?.displayLabel || 'Station selected.' : 'No station assigned.'
+const getAssignmentCardSummary = (employeeId) => {
+  const assignment = assignmentLookup.value[employeeId]
+
+  if (!assignment) {
+    return 'No assignment yet.'
+  }
+
+  const sectionLabel =
+    rosterSections.value.find((section) => section.key === assignment.sectionKey)?.label || assignment.sectionKey || 'No section'
+  const detailLabel = assignment.detailKey ? getSectionDetailLabel(assignment.sectionKey, assignment.detailKey) : ''
+  const stationLabel = getAssignmentStationLabel(assignment)
+
+  return [sectionLabel, assignment.floorCode || '', detailLabel, stationLabel].filter(Boolean).join(' | ')
+}
 
 const shuffleItems = (items) => {
   const cloned = [...items]
@@ -340,29 +318,9 @@ const shuffleItems = (items) => {
 }
 
 const buildDefaultAssignments = () => {
-  const floorCodes = floors.value.length ? floors.value : ['P2', 'P3', 'P4']
   const usedStationIds = new Set()
-  const normalStationsByFloor = Object.fromEntries(
-    floorCodes.map((floorCode) => [
-      floorCode,
-      shuffleItems(
-        stations.value.filter(
-          (station) =>
-            !station.isFarAway && station.floorCode === floorCode && station.stationType !== 'QUANTITY_STOW',
-        ),
-      ),
-    ]),
-  )
-  const farStationsByFloor = Object.fromEntries(
-    floorCodes.map((floorCode) => [
-      floorCode,
-      shuffleItems(
-        stations.value.filter(
-          (station) =>
-            station.isFarAway && station.floorCode === floorCode && station.stationType !== 'QUANTITY_STOW',
-        ),
-      ),
-    ]),
+  const normalStations = shuffleItems(
+    stations.value.filter((station) => !station.isFarAway && station.stationType !== 'QUANTITY_STOW'),
   )
   const fallbackFarStations = shuffleItems(
     stations.value.filter((station) => station.isFarAway && station.stationType !== 'QUANTITY_STOW'),
@@ -379,16 +337,12 @@ const buildDefaultAssignments = () => {
   }
 
   return employeeOptions.value.map((employee, index) => {
-    const floorCode = floorCodes[index % floorCodes.length]
-    const station =
-      pickStation(normalStationsByFloor[floorCode]) ||
-      pickStation(farStationsByFloor[floorCode]) ||
-      pickStation(fallbackFarStations)
+    const station = pickStation(normalStations) || pickStation(fallbackFarStations)
 
     return {
       employeeId: employee.id,
       sectionKey: 'STOW',
-      floorCode,
+      floorCode: station?.floorCode || floors.value[0] || 'P2',
       stationId: station?.id || null,
       detailKey: '',
     }
@@ -486,37 +440,14 @@ const openStationListModal = ({ title, description, accentClass, emptyMessage, s
   showStationListModal.value = true
 }
 
-const closeAssignmentPromptModal = () => {
-  showAssignmentPromptModal.value = false
-  assignmentPromptState.employeeId = null
-  assignmentPromptState.sectionKey = ''
-  assignmentPromptState.mode = 'detail'
-  assignmentPromptState.title = ''
-  assignmentPromptState.description = ''
-  assignmentPromptState.options = []
+const closeAssignmentEditorModal = () => {
+  showAssignmentEditorModal.value = false
+  assignmentEditorState.employeeId = null
 }
 
-const openAssignmentPromptModal = (employeeId, requestedSectionKey = '') => {
-  const currentAssignment = assignmentLookup.value[employeeId]
-  const sectionKey = normalizeSectionKey(requestedSectionKey || currentAssignment?.sectionKey)
-
-  if (!employeeId || !sectionKey) {
-    return
-  }
-
-  if (requiresDetailSelection(sectionKey)) {
-    assignmentPromptState.employeeId = employeeId
-    assignmentPromptState.sectionKey = sectionKey
-    assignmentPromptState.mode = 'detail'
-    assignmentPromptState.title = sectionKey === 'ISS' ? 'Choose ISS Role' : 'Choose Water Spider Role'
-    assignmentPromptState.description =
-      sectionKey === 'ISS'
-        ? 'Select the ISS role for this associate. Multiple associates can share the same ISS role.'
-        : 'Select the Water Spider task for this associate.'
-    assignmentPromptState.options = getSectionDetailOptions(sectionKey)
-    showAssignmentPromptModal.value = true
-    return
-  }
+const openAssignmentEditorModal = (employeeId) => {
+  assignmentEditorState.employeeId = employeeId
+  showAssignmentEditorModal.value = true
 }
 
 const updateAssignment = (employeeId, nextAssignment) => {
@@ -549,11 +480,6 @@ const setEmployeeFloor = (employeeId, floorCode) => {
   if (!updatedAssignment) {
     return
   }
-
-  if (requiresDetailSelection(updatedAssignment.sectionKey) && !updatedAssignment.detailKey) {
-    openAssignmentPromptModal(employeeId, updatedAssignment.sectionKey)
-  }
-
 }
 
 const setEmployeeSection = (employeeId, sectionKey) => {
@@ -572,36 +498,34 @@ const setEmployeeSection = (employeeId, sectionKey) => {
     stationId: currentAssignment?.stationId || null,
     detailKey: currentAssignment?.detailKey || '',
   })
-
-  if (requiresDetailSelection(normalizedSectionKey)) {
-    openAssignmentPromptModal(employeeId, normalizedSectionKey)
-  }
 }
 
 const selectAssignmentDetail = (detailKey) => {
-  const employeeId = assignmentPromptState.employeeId
+  const employeeId = assignmentEditorState.employeeId
   const currentAssignment = assignmentLookup.value[employeeId]
 
   if (!employeeId || !currentAssignment) {
-    closeAssignmentPromptModal()
     return
   }
 
+  const inferredFloorCode = inferFloorCodeFromDetailKey(detailKey)
+
   updateAssignment(employeeId, {
     ...currentAssignment,
+    floorCode: inferredFloorCode || currentAssignment.floorCode,
     detailKey,
     stationId: null,
   })
-  closeAssignmentPromptModal()
 }
 
 const assignStationToEmployee = (employeeId, stationId) => {
   const currentAssignment = assignmentLookup.value[employeeId]
+  const station = stationLookup.value[stationId]
 
   updateAssignment(employeeId, {
     employeeId,
     sectionKey: currentAssignment?.sectionKey || 'STOW',
-    floorCode: currentAssignment?.floorCode || floors.value[0] || 'P2',
+    floorCode: station?.floorCode || currentAssignment?.floorCode || floors.value[0] || 'P2',
     detailKey: currentAssignment?.detailKey || '',
     stationId,
   })
@@ -942,7 +866,7 @@ const deleteRoster = async (roster) => {
           <div>
             <p class="text-xl font-semibold text-slate-900">{{ editingRosterId ? 'Edit Roster' : 'Create Roster' }}</p>
             <p class="mt-1 text-sm text-slate-500">
-              All active associates start equally divided across floors in `Stow` with random default stations, then you can move floor, section, role, and station assignments below.
+              All active associates start in `Stow` with random stations, and you can edit each associate from the action button on the right.
             </p>
           </div>
           <button
@@ -1055,109 +979,39 @@ const deleteRoster = async (roster) => {
                   :key="employee.id"
                   class="rounded-2xl border border-slate-200 px-4 py-4"
                 >
-                  <div class="flex items-center gap-3">
-                    <img
-                      v-if="employee.photoData"
-                      :src="employee.photoData"
-                      :alt="employee.fullName"
-                      class="h-11 w-11 rounded-full object-cover"
-                    />
-                    <div
-                      v-else
-                      class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-slate-600"
+                  <div class="flex items-start justify-between gap-4">
+                    <div class="flex min-w-0 items-center gap-3">
+                      <img
+                        v-if="employee.photoData"
+                        :src="employee.photoData"
+                        :alt="employee.fullName"
+                        class="h-11 w-11 rounded-full object-cover"
+                      />
+                      <div
+                        v-else
+                        class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-slate-600"
+                      >
+                        <span class="material-symbols-outlined text-base">person</span>
+                      </div>
+                      <div class="min-w-0">
+                        <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
+                        <p class="mt-1 text-xs text-slate-400">
+                          {{ employee.badgeId }}<span v-if="employee.badgeUsername"> | {{ employee.badgeUsername }}</span> | {{ employee.departmentName }} / {{ employee.roleName }}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      @click="openAssignmentEditorModal(employee.id)"
+                      class="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
                     >
-                      <span class="material-symbols-outlined text-base">person</span>
-                    </div>
-                    <div class="min-w-0">
-                      <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
-                      <p class="mt-1 text-xs text-slate-400">
-                        {{ employee.badgeId }}<span v-if="employee.badgeUsername"> | {{ employee.badgeUsername }}</span> | {{ employee.departmentName }} / {{ employee.roleName }}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <label class="block min-w-0">
-                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        Floor
-                      </span>
-                      <select
-                        :value="assignmentLookup[employee.id]?.floorCode || ''"
-                        class="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
-                        @change="setEmployeeFloor(employee.id, $event.target.value)"
-                      >
-                        <option v-for="floor in floors" :key="floor" :value="floor">{{ floor }}</option>
-                      </select>
-                    </label>
-
-                    <label class="block min-w-0">
-                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        Section
-                      </span>
-                      <select
-                        :value="assignmentLookup[employee.id]?.sectionKey || ''"
-                        class="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
-                        @change="setEmployeeSection(employee.id, $event.target.value)"
-                      >
-                        <option value="">Not assigned</option>
-                        <option v-for="section in rosterSections" :key="section.key" :value="section.key">
-                          {{ section.label }}
-                        </option>
-                      </select>
-                    </label>
-
-                    <div class="block min-w-0">
-                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        Role / Task
-                      </span>
-                      <button
-                        v-if="requiresDetailSelection(assignmentLookup[employee.id]?.sectionKey)"
-                        type="button"
-                        @click="openAssignmentPromptModal(employee.id)"
-                        class="flex h-10 w-full min-w-0 items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 text-left text-sm text-slate-700"
-                      >
-                        <span class="min-w-0 truncate">{{ getAssignmentDetailButtonLabel(employee.id) }}</span>
-                        <span class="material-symbols-outlined text-base text-slate-400">open_in_new</span>
-                      </button>
-                      <div
-                        v-else
-                        class="flex h-10 min-w-0 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
-                      >
-                        No extra role prompt
-                      </div>
-                    </div>
-
-                    <div class="block min-w-0">
-                      <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                        Station
-                      </span>
-                      <template v-if="supportsStationAssignment(assignmentLookup[employee.id]?.sectionKey)">
-                        <select
-                          :value="assignmentLookup[employee.id]?.stationId || ''"
-                          class="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
-                          @change="requestStationAssignment(employee.id, $event.target.value)"
-                        >
-                          <option value="">No station assigned</option>
-                          <option
-                            v-for="station in getAllowedStationsForEmployee(employee.id)"
-                            :key="station.id"
-                            :value="station.id"
-                          >
-                            {{ station.displayLabel }}
-                          </option>
-                        </select>
-                      </template>
-                      <div
-                        v-else
-                        class="flex h-10 min-w-0 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
-                      >
-                        No station for this section
-                      </div>
-                    </div>
+                      <span class="material-symbols-outlined text-base">edit_note</span>
+                      View Station Details
+                    </button>
                   </div>
 
                   <div class="mt-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-                    {{ getAssignmentSummaryText(employee.id) }}
+                    {{ getAssignmentCardSummary(employee.id) }}
                   </div>
                 </article>
 
@@ -1193,18 +1047,21 @@ const deleteRoster = async (roster) => {
     </div>
 
     <div
-      v-if="showAssignmentPromptModal"
+      v-if="showAssignmentEditorModal && activeAssignmentEmployee && activeAssignment"
       class="fixed inset-0 z-[58] flex items-center justify-center bg-slate-950/50 px-4 py-4"
     >
       <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p class="text-xl font-semibold text-slate-900">{{ assignmentPromptState.title }}</p>
-            <p class="mt-1 text-sm text-slate-500">{{ assignmentPromptState.description }}</p>
+            <p class="text-xl font-semibold text-slate-900">Edit Associate Assignment</p>
+            <p class="mt-1 text-sm text-slate-500">
+              {{ activeAssignmentEmployee.fullName }} | {{ activeAssignmentEmployee.badgeId }}
+              <span v-if="activeAssignmentEmployee.badgeUsername">| {{ activeAssignmentEmployee.badgeUsername }}</span>
+            </p>
           </div>
           <button
             type="button"
-            @click="closeAssignmentPromptModal"
+            @click="closeAssignmentEditorModal"
             class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
           >
             <span class="material-symbols-outlined text-base">close</span>
@@ -1212,19 +1069,78 @@ const deleteRoster = async (roster) => {
         </div>
 
         <div class="flex-1 overflow-y-auto px-6 py-5">
-          <div v-if="assignmentPromptState.mode === 'detail'" class="grid gap-3 sm:grid-cols-2">
-            <button
-              v-for="option in assignmentPromptState.options"
-              :key="option.key"
-              type="button"
-              @click="selectAssignmentDetail(option.key)"
-              class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left text-sm text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
-            >
-              <p class="font-semibold text-slate-900">{{ option.label }}</p>
-              <p class="mt-1 text-xs text-slate-500">Assign this role to the selected associate.</p>
-            </button>
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="block">
+              <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Floor</span>
+              <select
+                :value="activeAssignment.floorCode || ''"
+                class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                @change="setEmployeeFloor(activeAssignmentEmployee.id, $event.target.value)"
+              >
+                <option v-for="floor in floors" :key="floor" :value="floor">{{ floor }}</option>
+              </select>
+            </label>
+
+            <label class="block">
+              <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Section</span>
+              <select
+                :value="activeAssignment.sectionKey || ''"
+                class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                @change="setEmployeeSection(activeAssignmentEmployee.id, $event.target.value)"
+              >
+                <option value="">Not assigned</option>
+                <option v-for="section in rosterSections" :key="section.key" :value="section.key">
+                  {{ section.label }}
+                </option>
+              </select>
+            </label>
+
+            <label class="block" :class="requiresDetailSelection(activeAssignment.sectionKey) ? '' : 'opacity-60'">
+              <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Role / Task</span>
+              <select
+                :value="activeAssignment.detailKey || ''"
+                :disabled="!requiresDetailSelection(activeAssignment.sectionKey)"
+                class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none disabled:cursor-not-allowed"
+                @change="selectAssignmentDetail($event.target.value)"
+              >
+                <option value="">
+                  {{ requiresDetailSelection(activeAssignment.sectionKey) ? 'Choose role / task' : 'No role / task for this section' }}
+                </option>
+                <option
+                  v-for="option in getSectionDetailOptions(activeAssignment.sectionKey)"
+                  :key="option.key"
+                  :value="option.key"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+
+            <label class="block" :class="supportsStationAssignment(activeAssignment.sectionKey) ? '' : 'opacity-60'">
+              <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Station</span>
+              <select
+                :value="activeAssignment.stationId || ''"
+                :disabled="!supportsStationAssignment(activeAssignment.sectionKey)"
+                class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none disabled:cursor-not-allowed"
+                @change="requestStationAssignment(activeAssignmentEmployee.id, $event.target.value)"
+              >
+                <option value="">
+                  {{ supportsStationAssignment(activeAssignment.sectionKey) ? 'No station assigned' : 'No station for this section' }}
+                </option>
+                <option
+                  v-for="station in getAllowedStationsForEmployee(activeAssignmentEmployee.id)"
+                  :key="station.id"
+                  :value="station.id"
+                >
+                  {{ station.displayLabel }}
+                </option>
+              </select>
+            </label>
           </div>
 
+          <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+            {{ getAssignmentCardSummary(activeAssignmentEmployee.id) }}
+          </div>
         </div>
       </div>
     </div>
