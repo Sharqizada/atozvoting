@@ -187,8 +187,19 @@ const roundInfo = computed(() => roundSummary.value)
 const finishedRoundInfo = computed(() => finishedRoundSummary.value)
 const displayRound = computed(() => roundInfo.value || finishedRoundInfo.value)
 const isFinishedRoundState = computed(() => !roundInfo.value && Boolean(finishedRoundInfo.value))
+const finishedRoundVisibility = computed(() => {
+  const visibility = finishedRoundInfo.value?.resultVisibility
+  return visibility === 'VISIBLE' || visibility === 'HIDDEN' || visibility === 'WAITING'
+    ? visibility
+    : finishedRoundInfo.value?.winnersPublished
+      ? 'VISIBLE'
+      : 'WAITING'
+})
 const hasPublishedWinners = computed(
   () => isFinishedRoundState.value && Boolean(finishedRoundInfo.value?.winnersPublished) && (finishedRoundInfo.value?.winners?.length || 0) > 0,
+)
+const showResultsOnlyPage = computed(
+  () => isFinishedRoundState.value && finishedRoundVisibility.value === 'VISIBLE' && hasPublishedWinners.value,
 )
 const showConfirmVoteStep = computed(
   () => isCameraModalOpen.value && Boolean(pendingVoteCard.value && verifiedVoter.value),
@@ -778,7 +789,89 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="public-brand-shell relative min-h-screen overflow-hidden font-sans text-slate-900" :style="brandingVars">
+  <div
+    v-if="showResultsOnlyPage"
+    class="public-brand-results-screen min-h-screen font-sans text-slate-900"
+    :style="brandingVars"
+  >
+    <div class="mx-auto flex min-h-screen w-full max-w-7xl flex-col justify-center px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
+      <section class="rounded-[36px] border border-white/70 bg-white/88 px-5 py-8 text-center shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur sm:px-8 sm:py-10">
+        <p class="text-xs font-semibold uppercase tracking-[0.26em] text-violet-600">Official Result</p>
+        <h1 class="mt-4 text-3xl font-semibold leading-tight text-slate-900 sm:text-5xl">{{ finishedRoundInfo?.name || 'Voting Result' }}</h1>
+        <p class="mx-auto mt-4 max-w-3xl text-sm text-slate-500 sm:text-base">
+          Voting is finished. Here are the official top 3 associates selected from this round.
+        </p>
+        <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
+          <span class="inline-flex items-center gap-2 rounded-full bg-violet-50 px-4 py-2 text-xs font-semibold text-violet-700 sm:text-sm">
+            <span class="material-symbols-outlined text-base">calendar_month</span>
+            {{ formatDateRange(finishedRoundInfo?.startDate, finishedRoundInfo?.endDate) || 'Schedule not available' }}
+          </span>
+          <span class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 sm:text-sm">
+            <span class="material-symbols-outlined text-base">task_alt</span>
+            {{ finishedRoundInfo?.winners?.length || 0 }} winners published
+          </span>
+        </div>
+      </section>
+
+      <section class="mt-8 grid gap-5 md:grid-cols-3 md:items-center">
+        <article
+          v-for="person in publicWinnerCards"
+          :key="person.place"
+          class="relative overflow-hidden rounded-[32px] border px-5 py-6 text-center"
+          :class="[getWinnerPanelClass(person.place), person.place === 1 ? 'md:min-h-[450px] md:-mt-6 md:py-8 shadow-[0_20px_50px_rgba(245,158,11,0.16)]' : 'md:min-h-[405px] shadow-[0_16px_38px_rgba(15,23,42,0.08)]']"
+        >
+          <div
+            class="mx-auto flex h-14 w-14 items-center justify-center rounded-full border bg-white shadow-sm"
+            :class="getWinnerIconWrapClass(person.place)"
+          >
+            <span class="material-symbols-outlined text-3xl">{{ getWinnerIcon(person.place) }}</span>
+          </div>
+          <div class="relative mx-auto mt-5 flex h-28 w-28 items-center justify-center overflow-hidden rounded-full ring-8 ring-white/70 shadow-sm sm:h-32 sm:w-32" :class="getWinnerAvatarClass(person.place)">
+            <img
+              v-if="person.photoData"
+              :src="person.photoData"
+              :alt="person.name"
+              class="h-full w-full object-cover"
+            />
+            <span v-else class="text-2xl font-semibold text-slate-700">{{ getInitials(person.name) }}</span>
+          </div>
+          <div class="mt-4">
+            <span
+              class="inline-flex rounded-full px-3 py-1 text-xs font-semibold shadow-sm"
+              :class="getWinnerBadgeClass(person.place)"
+            >
+              {{ person.medal }}
+            </span>
+          </div>
+          <p class="mt-5 text-[28px] font-semibold leading-tight text-slate-900">{{ person.name }}</p>
+          <p class="mt-2 text-sm text-slate-500">{{ person.categoriesText || 'Voting Categories' }}</p>
+          <div class="mx-auto mt-5 h-px w-[78%] bg-slate-200"></div>
+          <p class="mt-5 text-[42px] font-bold" :class="getWinnerValueClass(person.place)">{{ person.votes }}</p>
+          <p class="mt-1 text-sm text-slate-500">votes received</p>
+          <div class="mx-auto mt-5 h-px w-[78%] border-t border-dashed border-slate-200"></div>
+          <p class="mt-5 text-[28px] font-bold" :class="getWinnerValueClass(person.place)">{{ person.share }}</p>
+          <p class="mt-1 text-sm text-slate-500">of valid votes</p>
+        </article>
+      </section>
+
+      <section class="mt-8 grid gap-4 md:grid-cols-3">
+        <div class="rounded-[28px] border border-white/70 bg-white/88 px-5 py-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur">
+          <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Round</p>
+          <p class="mt-3 text-lg font-semibold text-slate-900">{{ finishedRoundInfo?.name || 'Completed voting round' }}</p>
+        </div>
+        <div class="rounded-[28px] border border-white/70 bg-white/88 px-5 py-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur">
+          <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Voting Period</p>
+          <p class="mt-3 text-lg font-semibold text-slate-900">{{ formatDateRange(finishedRoundInfo?.startDate, finishedRoundInfo?.endDate) || 'Not available' }}</p>
+        </div>
+        <div class="rounded-[28px] border border-white/70 bg-white/88 px-5 py-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur">
+          <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Result Status</p>
+          <p class="mt-3 text-lg font-semibold text-violet-700">Published on Home page</p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div v-else class="public-brand-shell relative min-h-screen overflow-hidden font-sans text-slate-900" :style="brandingVars">
     <div class="pointer-events-none absolute inset-0">
       <div class="absolute -left-16 top-16 h-56 w-56 rounded-full bg-emerald-200/35 blur-3xl"></div>
       <div class="absolute right-0 top-0 h-72 w-72 rounded-full bg-cyan-200/30 blur-3xl"></div>
@@ -921,9 +1014,9 @@ onBeforeUnmount(() => {
           <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-white text-amber-500 shadow-sm">
             <span class="material-symbols-outlined text-3xl">campaign</span>
           </div>
-          <p class="mt-5 text-2xl font-semibold text-slate-900">Voting round finished</p>
+          <p class="mt-5 text-2xl font-semibold text-slate-900">Voting is finished</p>
           <p class="mx-auto mt-3 max-w-2xl text-sm text-slate-600">
-            Please wait for the result announcement from the admin. The live vote cards are hidden because this round is already completed.
+            Waiting for result. The admin has not shown the official top 3 on the Home page yet.
           </p>
           <p class="mt-4 text-xs text-slate-500">
             {{ formatDateRange(finishedRoundInfo?.startDate, finishedRoundInfo?.endDate) || 'Result timing not available' }}
@@ -1283,6 +1376,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.public-brand-results-screen {
+  background:
+    radial-gradient(circle at top, rgba(245, 243, 255, 0.9), transparent 32%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
+}
+
 .public-brand-shell {
   background:
     radial-gradient(circle at top, var(--brand-primary-soft), transparent 30%),

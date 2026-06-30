@@ -89,6 +89,10 @@ const getPublicBrandingSettings = (settings = {}) => ({
   siteLogo: settings.site_logo || DEFAULT_SITE_INFO.siteLogo,
   brandingColors: getBrandingSettings(settings),
 })
+const normalizeRoundResultVisibility = (value, fallback = 'WAITING') => {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  return ['WAITING', 'VISIBLE', 'HIDDEN'].includes(normalized) ? normalized : fallback
+}
 
 const getDefaultSettingEntries = () => [
   ['site_name', 'general', DEFAULT_SITE_INFO.siteName],
@@ -587,6 +591,7 @@ const createSchema = async () => {
       valid_votes INT NOT NULL DEFAULT 0,
       invalid_votes INT NOT NULL DEFAULT 0,
       winners_published TINYINT(1) NOT NULL DEFAULT 0,
+      result_visibility VARCHAR(20) NOT NULL DEFAULT 'WAITING',
       created_by_admin_id INT NULL,
       created_at DATETIME NOT NULL,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -596,6 +601,7 @@ const createSchema = async () => {
   await ensureColumn('voting_rounds', 'description TEXT NULL AFTER name')
   await ensureColumn('voting_rounds', "access_code VARCHAR(5) NOT NULL UNIQUE AFTER name")
   await ensureColumn('voting_rounds', 'winners_published TINYINT(1) NOT NULL DEFAULT 0 AFTER invalid_votes')
+  await ensureColumn('voting_rounds', "result_visibility VARCHAR(20) NOT NULL DEFAULT 'WAITING' AFTER winners_published")
 
   await execute(`
     CREATE TABLE IF NOT EXISTS voting_round_categories (
@@ -1358,7 +1364,7 @@ const completeVotingRound = async (roundId) => {
   await execute(
     `
       UPDATE voting_rounds
-      SET status = 'COMPLETED', end_date = NOW(), updated_at = NOW()
+      SET status = 'COMPLETED', end_date = NOW(), winners_published = 0, result_visibility = 'WAITING', updated_at = NOW()
       WHERE id = ?
     `,
     [roundId],
@@ -1469,6 +1475,10 @@ const getRoundWinnerPreview = async (roundId) => {
     totalVotes: votes.length,
     validVotes,
     winnersPublished: Boolean(round.winners_published),
+    resultVisibility: normalizeRoundResultVisibility(
+      round.result_visibility,
+      round.winners_published ? 'VISIBLE' : 'WAITING',
+    ),
     winners: winnerTotals.map((entry, index) => {
       const candidateKey = `${entry.name}|${entry.badge}`
       const categories = Array.from(winnerCategoryMap.get(candidateKey) || [])
@@ -1495,31 +1505,35 @@ const getRoundWinnerPreview = async (roundId) => {
   }
 }
 
-const publishRoundWinners = async (roundId) => {
+const setRoundResultVisibility = async (roundId, requestedVisibility) => {
   const preview = await getRoundWinnerPreview(roundId)
+  const visibility = normalizeRoundResultVisibility(requestedVisibility)
 
   if (preview.round.status !== 'COMPLETED') {
-    throw new Error('Only a completed voting round can publish winners.')
+    throw new Error('Only a completed voting round can update result visibility.')
   }
 
-  if (!preview.winners.length) {
-    throw new Error('No winner data is available to publish for this voting round.')
+  if (visibility === 'VISIBLE' && !preview.winners.length) {
+    throw new Error('No winner data is available to show for this voting round.')
   }
 
   await execute(
     `
       UPDATE voting_rounds
-      SET winners_published = 1, updated_at = NOW()
+      SET winners_published = ?, result_visibility = ?, updated_at = NOW()
       WHERE id = ?
     `,
-    [roundId],
+    [visibility === 'VISIBLE' ? 1 : 0, visibility, roundId],
   )
 
   return {
     ...preview,
-    winnersPublished: true,
+    winnersPublished: visibility === 'VISIBLE',
+    resultVisibility: visibility,
   }
 }
+
+const publishRoundWinners = async (roundId) => setRoundResultVisibility(roundId, 'VISIBLE')
 
 const getRoundCategories = async (roundId) =>
   query(
@@ -2038,6 +2052,10 @@ app.get('/api/voting-rounds', async (_req, res) => {
           description: round.description || '',
           roundId: round.access_code,
           winnersPublished: Boolean(round.winners_published),
+          resultVisibility: normalizeRoundResultVisibility(
+            round.result_visibility,
+            round.winners_published ? 'VISIBLE' : 'WAITING',
+          ),
           dates: formatDurationRange(round.start_date, round.end_date),
           status: round.status,
           statusClass: statusClassMap[round.status],
@@ -2427,18 +2445,19 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
 
     if (!activeRound) {
       const finishedRound = await getLatestCompletedRound()
-      const publishedRound = await getLatestPublishedWinnerRound()
-      const publishedWinnerPreview =
-        publishedRound && finishedRound && publishedRound.id === finishedRound.id
-          ? await getRoundWinnerPreview(publishedRound.id)
-          : null
+      const resultVisibility = normalizeRoundResultVisibility(
+        finishedRound?.result_visibility,
+        finishedRound?.winners_published ? 'VISIBLE' : 'WAITING',
+      )
+      const winnerPreview =
+        finishedRound && resultVisibility === 'VISIBLE' ? await getRoundWinnerPreview(finishedRound.id) : null
 
       return res.json({
         hasActiveRound: false,
         ...getPublicBrandingSettings(settings),
         round: null,
         categories: [],
-        finishedRound: finishedRound
+        finishedRound: finishedRound && resultVisibility !== 'HIDDEN'
           ? {
               id: finishedRound.id,
               name: finishedRound.name,
@@ -2447,8 +2466,9 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
               endDate: finishedRound.end_date,
               roundId: finishedRound.access_code,
               status: finishedRound.status,
-              winnersPublished: Boolean(finishedRound.winners_published),
-              winners: publishedWinnerPreview?.winners || [],
+              winnersPublished: resultVisibility === 'VISIBLE',
+              resultVisibility,
+              winners: winnerPreview?.winners || [],
             }
           : null,
       })
@@ -3029,15 +3049,16 @@ app.post('/api/voting-rounds', async (req, res) => {
 
   try {
     const accessCode = await getUniqueRoundAccessCode()
+    const resultVisibility = requestedStatus === 'COMPLETED' ? 'WAITING' : 'HIDDEN'
     await connection.beginTransaction()
     const result = await executeWith(
       connection,
       `
         INSERT INTO voting_rounds
-        (name, description, access_code, start_date, end_date, status, participant_count, total_votes, valid_votes, invalid_votes, created_by_admin_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, NOW())
+        (name, description, access_code, start_date, end_date, status, participant_count, total_votes, valid_votes, invalid_votes, winners_published, result_visibility, created_by_admin_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, NOW())
       `,
-      [name, description, accessCode, startDate, endDate, status, participantIds.length, 1],
+      [name, description, accessCode, startDate, endDate, status, participantIds.length, resultVisibility, 1],
     )
 
     await syncRoundParticipants(result.insertId, participantIds, connection)
@@ -3084,15 +3105,32 @@ app.put('/api/voting-rounds/:id', async (req, res) => {
   const connection = await pool.getConnection()
 
   try {
+    const existingRound = await getVotingRoundById(roundId)
+
+    if (!existingRound) {
+      return res.status(404).json({ message: 'Voting round not found.' })
+    }
+
+    const resultVisibility =
+      requestedStatus === 'COMPLETED'
+        ? existingRound.status === 'COMPLETED'
+          ? normalizeRoundResultVisibility(
+              existingRound.result_visibility,
+              existingRound.winners_published ? 'VISIBLE' : 'WAITING',
+            )
+          : 'WAITING'
+        : 'HIDDEN'
+    const winnersPublished = requestedStatus === 'COMPLETED' && existingRound.status === 'COMPLETED' ? Number(existingRound.winners_published || 0) : 0
+
     await connection.beginTransaction()
     await executeWith(
       connection,
       `
         UPDATE voting_rounds
-        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, participant_count = ?, updated_at = NOW()
+        SET name = ?, description = ?, start_date = ?, end_date = ?, status = ?, participant_count = ?, winners_published = ?, result_visibility = ?, updated_at = NOW()
         WHERE id = ?
       `,
-      [name, description, startDate, endDate, status, participantIds.length, roundId],
+      [name, description, startDate, endDate, status, participantIds.length, winnersPublished, resultVisibility, roundId],
     )
 
     await syncRoundParticipants(roundId, participantIds, connection)
@@ -3201,6 +3239,8 @@ app.get('/api/voting-rounds/:id/winners', async (req, res) => {
         endDate: result.round.end_date,
         totalVotes: result.totalVotes,
         validVotes: result.validVotes,
+        winnersPublished: result.winnersPublished,
+        resultVisibility: result.resultVisibility,
       },
       winners: result.winners,
     })
@@ -3229,13 +3269,52 @@ app.post('/api/voting-rounds/:id/publish-winners', async (req, res) => {
         endDate: result.round.end_date,
         totalVotes: result.totalVotes,
         validVotes: result.validVotes,
-        winnersPublished: true,
+        winnersPublished: result.winnersPublished,
+        resultVisibility: result.resultVisibility,
       },
       winners: result.winners,
       message: 'Winner list is now live on the Home page.',
     })
   } catch (error) {
     return res.status(400).json({ message: error.message || 'Unable to publish the winner list.' })
+  }
+})
+
+app.post('/api/voting-rounds/:id/result-visibility', async (req, res) => {
+  const roundId = Number(req.params.id)
+  const visibility = normalizeRoundResultVisibility(req.body?.visibility)
+
+  if (!roundId) {
+    return res.status(400).json({ message: 'Valid round id is required.' })
+  }
+
+  try {
+    const result = await setRoundResultVisibility(roundId, visibility)
+    const message =
+      visibility === 'VISIBLE'
+        ? 'Winner list is now live on the Home page.'
+        : visibility === 'HIDDEN'
+          ? 'Winner list is now hidden from the Home page.'
+          : 'Home page now shows that voting is finished and waiting for the result.'
+
+    return res.json({
+      round: {
+        id: result.round.id,
+        name: result.round.name,
+        description: result.round.description || '',
+        status: result.round.status,
+        startDate: result.round.start_date,
+        endDate: result.round.end_date,
+        totalVotes: result.totalVotes,
+        validVotes: result.validVotes,
+        winnersPublished: result.winnersPublished,
+        resultVisibility: result.resultVisibility,
+      },
+      winners: result.winners,
+      message,
+    })
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Unable to update the Home page result visibility.' })
   }
 })
 

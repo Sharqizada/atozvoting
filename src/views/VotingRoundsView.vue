@@ -34,6 +34,7 @@ const submitError = ref('')
 const submitSuccess = ref('')
 const isSubmitting = ref(false)
 const isLoadingWinners = ref(false)
+const isUpdatingResultVisibility = ref(false)
 const winnerPreview = ref({
   round: null,
   winners: [],
@@ -84,6 +85,14 @@ const winnerCards = computed(() => {
   const third = ordered.find((entry) => entry.place === 3)
   return [second, first, third].filter(Boolean)
 })
+const getResultVisibilityLabel = (visibility) =>
+  visibility === 'VISIBLE' ? 'Results Live' : visibility === 'HIDDEN' ? 'Results Hidden' : 'Waiting Result'
+const getResultVisibilityClass = (visibility) =>
+  visibility === 'VISIBLE'
+    ? 'bg-violet-100 text-violet-600'
+    : visibility === 'HIDDEN'
+      ? 'bg-slate-100 text-slate-600'
+      : 'bg-amber-100 text-amber-700'
 
 const resetForm = () => {
   createForm.name = ''
@@ -366,15 +375,30 @@ const openWinnerPreview = async (round) => {
   }
 
   try {
-    const response = await postJson(`/api/voting-rounds/${round.id}/publish-winners`, {})
+    const response = await fetchJson(`/api/voting-rounds/${round.id}/winners`)
     winnerPreview.value = response
-    submitSuccess.value = response.message || `"${round.name}" winner list is now live on the Home page.`
-    await load()
   } catch (requestError) {
     showWinnerModal.value = false
-    submitError.value = requestError.message || 'Unable to publish the winner list.'
+    submitError.value = requestError.message || 'Unable to load the winner preview.'
   } finally {
     isLoadingWinners.value = false
+  }
+}
+
+const updateResultVisibility = async (round, visibility) => {
+  submitError.value = ''
+  submitSuccess.value = ''
+  isUpdatingResultVisibility.value = true
+
+  try {
+    const response = await postJson(`/api/voting-rounds/${round.id}/result-visibility`, { visibility })
+    winnerPreview.value = response
+    submitSuccess.value = response.message || 'Home page result visibility updated successfully.'
+    await load()
+  } catch (requestError) {
+    submitError.value = requestError.message || 'Unable to update the Home page result visibility.'
+  } finally {
+    isUpdatingResultVisibility.value = false
   }
 }
 </script>
@@ -464,10 +488,11 @@ const openWinnerPreview = async (round) => {
                     <div class="flex flex-wrap items-center gap-2">
                       <p class="font-semibold text-slate-800">{{ round.name }}</p>
                       <span
-                        v-if="round.winnersPublished"
-                        class="rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-semibold text-violet-600"
+                        v-if="round.status === 'COMPLETED'"
+                        class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                        :class="getResultVisibilityClass(round.resultVisibility)"
                       >
-                        Winners Live
+                        {{ getResultVisibilityLabel(round.resultVisibility) }}
                       </span>
                     </div>
                     <p class="mt-1 text-xs text-slate-400">{{ round.dates }}</p>
@@ -789,7 +814,7 @@ const openWinnerPreview = async (round) => {
       <div class="w-full max-w-4xl rounded-3xl bg-white p-6 shadow-2xl">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-xl font-semibold text-slate-900">Winner List Live</p>
+            <p class="text-xl font-semibold text-slate-900">Result Visibility</p>
             <p class="mt-1 text-sm text-slate-500">{{ winnerPreview.round?.name || 'Completed voting round' }}</p>
           </div>
           <button type="button" @click="closeWinnerModal" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500">
@@ -798,7 +823,15 @@ const openWinnerPreview = async (round) => {
         </div>
 
         <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          Only the top 3 winners are shown for this round, and this list is now visible on the Home page.
+          <span v-if="winnerPreview.round?.resultVisibility === 'VISIBLE'">
+            The Home page is showing a clean results-only screen with the official top 3 winners.
+          </span>
+          <span v-else-if="winnerPreview.round?.resultVisibility === 'HIDDEN'">
+            The Home page is hiding the result screen and showing the normal public website instead.
+          </span>
+          <span v-else>
+            The Home page is showing that voting is finished and waiting for the result announcement.
+          </span>
         </div>
 
         <div v-if="isLoadingWinners" class="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
@@ -838,6 +871,39 @@ const openWinnerPreview = async (round) => {
           <span>Total votes: {{ winnerPreview.round.totalVotes || 0 }}</span>
           <span>Valid votes: {{ winnerPreview.round.validVotes || 0 }}</span>
           <span>{{ winnerPreview.round.status || 'Completed' }}</span>
+          <span
+            class="rounded-full px-3 py-1 text-xs font-semibold"
+            :class="getResultVisibilityClass(winnerPreview.round.resultVisibility)"
+          >
+            {{ getResultVisibilityLabel(winnerPreview.round.resultVisibility) }}
+          </span>
+        </div>
+
+        <div v-if="winnerPreview.round" class="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-5">
+          <button
+            type="button"
+            @click="updateResultVisibility(winnerPreview.round, 'WAITING')"
+            :disabled="isUpdatingResultVisibility"
+            class="inline-flex h-11 items-center rounded-xl border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-700 disabled:opacity-60"
+          >
+            {{ isUpdatingResultVisibility ? 'Saving...' : 'Show Waiting State' }}
+          </button>
+          <button
+            type="button"
+            @click="updateResultVisibility(winnerPreview.round, 'HIDDEN')"
+            :disabled="isUpdatingResultVisibility"
+            class="inline-flex h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 disabled:opacity-60"
+          >
+            {{ isUpdatingResultVisibility ? 'Saving...' : 'Hide From Home' }}
+          </button>
+          <button
+            type="button"
+            @click="updateResultVisibility(winnerPreview.round, 'VISIBLE')"
+            :disabled="isUpdatingResultVisibility"
+            class="inline-flex h-11 items-center rounded-xl bg-violet-600 px-4 text-sm font-medium text-white disabled:opacity-60"
+          >
+            {{ isUpdatingResultVisibility ? 'Saving...' : 'Show Result On Home' }}
+          </button>
         </div>
       </div>
     </div>
