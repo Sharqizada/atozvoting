@@ -101,12 +101,12 @@ const votesOverviewStyle = computed(() => {
       </article>
     </section>
 
-    <section class="mt-6 grid gap-5 xl:grid-cols-[1.25fr_1fr]">
-      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
+    <section class="mt-6 grid gap-5 2xl:grid-cols-[1.25fr_1fr]">
+      <article class="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
         <div class="flex items-center justify-between gap-4">
-          <div>
+          <div class="min-w-0">
             <p class="text-lg font-semibold text-slate-900">Current Voting Round</p>
-            <p class="mt-1 text-sm text-slate-500">{{ roundIntro }}</p>
+            <p class="mt-1 break-words text-sm text-slate-500">{{ roundIntro }}</p>
           </div>
         </div>
 
@@ -114,19 +114,19 @@ const votesOverviewStyle = computed(() => {
           <div class="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600 xl:h-20 xl:w-20">
             <span class="material-symbols-outlined text-3xl xl:text-4xl">calendar_month</span>
           </div>
-          <div class="flex-1">
+          <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-3">
-              <p class="text-xl font-bold text-slate-900 xl:text-2xl">{{ currentRound.name }}</p>
-              <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="roundStatusClass">
+              <p class="min-w-0 break-words text-xl font-bold text-slate-900 xl:text-2xl">{{ currentRound.name }}</p>
+              <span class="shrink-0 rounded-full px-3 py-1 text-xs font-semibold" :class="roundStatusClass">
                 {{ currentRound.status }}
               </span>
             </div>
             <div class="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-500">
-              <span class="inline-flex items-center gap-2">
+              <span class="inline-flex max-w-full items-center gap-2 break-words">
                 <span class="material-symbols-outlined text-base">calendar_today</span>
                 {{ currentRound.dateRange }}
               </span>
-              <span class="inline-flex items-center gap-2">
+              <span class="inline-flex max-w-full items-center gap-2 break-words">
                 <span class="material-symbols-outlined text-base">schedule</span>
                 {{ currentRound.createdLabel }}
               </span>
@@ -135,7 +135,7 @@ const votesOverviewStyle = computed(() => {
         </div>
 
         <div class="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4 xl:p-5">
-          <div class="grid gap-4 md:grid-cols-3">
+          <div class="grid gap-4 lg:grid-cols-3">
             <div>
               <p class="text-2xl font-bold text-slate-900 xl:text-3xl">{{ currentRound.daysRemaining }}</p>
               <p class="mt-2 text-sm text-slate-400">Days Remaining</p>
@@ -164,21 +164,21 @@ const votesOverviewStyle = computed(() => {
         </div>
       </article>
 
-      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
-        <div class="flex items-center justify-between gap-3">
-          <div>
+      <article class="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
             <p class="text-lg font-semibold text-slate-900">Votes Overview</p>
             <p class="mt-1 text-sm text-slate-500">This round performance by category.</p>
           </div>
           <button
             type="button"
-            class="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500"
+            class="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500"
           >
             This Round
           </button>
         </div>
 
-        <div class="mt-6 flex flex-col gap-5 lg:flex-row lg:items-center">
+        <div class="mt-6 flex flex-col gap-5 2xl:flex-row 2xl:items-center">
           <div class="relative mx-auto flex h-44 w-44 items-center justify-center xl:h-52 xl:w-52">
             <div
               class="h-44 w-44 rounded-full xl:h-52 xl:w-52"
@@ -190,32 +190,32 @@ const votesOverviewStyle = computed(() => {
             </div>
           </div>
 
-          <div class="w-full space-y-4">
+          <div class="min-w-0 w-full space-y-4">
             <div
               v-for="item in voteLegend"
               :key="item.label"
               class="flex items-center justify-between gap-4"
             >
-              <div class="flex items-center gap-3">
-                <span class="h-3 w-3 rounded-full" :class="item.color"></span>
-                <p class="text-sm text-slate-600">{{ item.label }}</p>
+              <div class="min-w-0 flex items-center gap-3">
+                <span class="h-3 w-3 shrink-0 rounded-full" :class="item.color"></span>
+                <p class="truncate text-sm text-slate-600">{{ item.label }}</p>
               </div>
-              <p class="text-sm font-semibold text-slate-700">{{ item.value }}</p>
+              <p class="shrink-0 text-sm font-semibold text-slate-700">{{ item.value }}</p>
             </div>
           </div>
         </div>
       </article>
     </section>
 
-    <section class="mt-6 grid gap-5 xl:grid-cols-[1.2fr_1fr]">
-      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-lg font-semibold text-slate-900">Top Candidates (Current Round)</p>
-          <button type="button" class="text-sm font-medium text-blue-600">View All Results</button>
+    <section class="mt-6 grid gap-5 2xl:grid-cols-[1.2fr_1fr]">
+      <article class="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="min-w-0 break-words text-lg font-semibold text-slate-900">Top Candidates (Current Round)</p>
+          <button type="button" class="shrink-0 text-sm font-medium text-blue-600">View All Results</button>
         </div>
 
         <div class="mt-5 overflow-x-auto">
-          <table class="min-w-full text-left text-sm">
+          <table class="min-w-[640px] text-left text-sm lg:min-w-full">
             <thead>
               <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
                 <th class="pb-4 pr-4 font-medium">Category</th>
@@ -240,26 +240,26 @@ const votesOverviewStyle = computed(() => {
         </div>
       </article>
 
-      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
-        <div class="flex items-center justify-between gap-3">
+      <article class="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <p class="text-lg font-semibold text-slate-900">Recent Activity</p>
-          <button type="button" class="text-sm font-medium text-blue-600">View All Logs</button>
+          <button type="button" class="shrink-0 text-sm font-medium text-blue-600">View All Logs</button>
         </div>
 
         <div class="mt-5 space-y-4">
           <div
             v-for="item in activityItems"
             :key="item.title"
-            class="flex items-start gap-4 rounded-3xl border border-slate-200 p-4"
+            class="flex flex-col gap-3 rounded-3xl border border-slate-200 p-4 sm:flex-row sm:items-start sm:gap-4"
           >
-            <div class="flex h-11 w-11 items-center justify-center rounded-2xl" :class="item.panel">
+            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl" :class="item.panel">
               <span class="material-symbols-outlined text-lg">{{ item.icon }}</span>
             </div>
-            <div class="flex-1">
-              <p class="text-sm font-medium text-slate-800">{{ item.title }}</p>
+            <div class="min-w-0 flex-1">
+              <p class="break-words text-sm font-medium text-slate-800">{{ item.title }}</p>
               <p class="mt-2 text-xs text-slate-400">by {{ item.actor || 'Admin' }}</p>
             </div>
-            <p class="text-xs text-slate-400">{{ item.time }}</p>
+            <p class="shrink-0 text-xs text-slate-400 sm:pt-1">{{ item.time }}</p>
           </div>
         </div>
       </article>

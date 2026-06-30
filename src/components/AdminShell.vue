@@ -145,7 +145,7 @@ onMounted(async () => {
           class="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3 sm:px-5 lg:fixed lg:left-[256px] lg:right-0 xl:left-[272px]"
         >
           <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div class="flex items-center gap-4">
+            <div class="min-w-0 flex items-center gap-4">
               <button
                 type="button"
                 class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-600 lg:hidden"
@@ -154,12 +154,12 @@ onMounted(async () => {
                 <span class="material-symbols-outlined">menu</span>
               </button>
 
-              <div>
-                <h1 class="text-xl font-bold text-slate-900 sm:text-2xl xl:text-3xl">{{ title }}</h1>
+              <div class="min-w-0">
+                <h1 class="truncate text-xl font-bold text-slate-900 sm:text-2xl xl:text-3xl">{{ title }}</h1>
               </div>
             </div>
 
-            <div class="flex flex-wrap items-center justify-end gap-3">
+            <div class="flex flex-wrap items-center justify-end gap-3 lg:max-w-[55%]">
               <slot name="actions"></slot>
 
               <button
@@ -174,13 +174,13 @@ onMounted(async () => {
                 </span>
               </button>
 
-              <div class="flex items-center gap-3">
+              <div class="min-w-0 flex items-center gap-3">
                 <div class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200">
                   <span class="material-symbols-outlined text-slate-600">person</span>
                 </div>
-                <div>
-                  <p class="text-sm font-semibold text-slate-900">{{ adminSession.full_name }}</p>
-                  <p class="text-xs text-slate-500">{{ adminSession.role }}</p>
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-semibold text-slate-900">{{ adminSession.full_name }}</p>
+                  <p class="truncate text-xs text-slate-500">{{ adminSession.role }}</p>
                 </div>
                 <span class="material-symbols-outlined text-slate-400">expand_more</span>
               </div>
