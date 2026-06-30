@@ -5,7 +5,7 @@ import {
   DecodeHintType,
   NotFoundException,
 } from '@zxing/library'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
 import { hexToRgba, resolveBrandingColors } from '../lib/branding'
@@ -40,6 +40,29 @@ let lastDetectedBadge = ''
 let lastDetectedAt = 0
 let audioContext = null
 let scannerTuneInterval = null
+const isLocalScannerDebugRuntime =
+  import.meta.env.DEV &&
+  typeof window !== 'undefined' &&
+  ['localhost', '127.0.0.1'].includes(window.location.hostname)
+// #region debug-point A:reporter
+const reportScannerDebug = (hypothesisId, msg, data = {}, runId = 'post-fix') =>
+  !isLocalScannerDebugRuntime
+    ? Promise.resolve()
+    :
+  fetch('http://127.0.0.1:7777/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 'barcode-scan-failure',
+      runId,
+      hypothesisId,
+      location: 'AdminSignIn.vue',
+      msg: `[DEBUG] ${msg}`,
+      data,
+      ts: Date.now(),
+    }),
+  }).catch(() => {})
+// #endregion
 const brandingVars = computed(() => {
   const palette = resolveBrandingColors(brandingColors.value)
 
@@ -59,10 +82,10 @@ const brandingVars = computed(() => {
 
 const buildScannerConstraints = () => {
   const baseConstraints = {
-    width: { ideal: 3840, min: 1280 },
-    height: { ideal: 2160, min: 720 },
+    width: { ideal: 1920, min: 640 },
+    height: { ideal: 1080, min: 480 },
     aspectRatio: { ideal: 1.7777777778 },
-    frameRate: { ideal: 120, min: 30 },
+    frameRate: { ideal: 60, min: 24 },
   }
 
   return selectedCameraId.value
@@ -100,18 +123,18 @@ const optimizeScannerTrack = async () => {
 
   if (typeof capabilities.zoom?.max === 'number' && capabilities.zoom.max > 1) {
     const minZoom = typeof capabilities.zoom.min === 'number' ? capabilities.zoom.min : 1
-    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 2.2)) })
+    advanced.push({ zoom: Math.min(capabilities.zoom.max, Math.max(minZoom, 1.35)) })
   }
 
   if (typeof capabilities.brightness?.max === 'number' && typeof capabilities.brightness?.min === 'number') {
     advanced.push({
-      brightness: Math.min(capabilities.brightness.max, Math.max(capabilities.brightness.min, 0.55)),
+      brightness: Math.min(capabilities.brightness.max, Math.max(capabilities.brightness.min, 0.18)),
     })
   }
 
   if (typeof capabilities.contrast?.max === 'number' && typeof capabilities.contrast?.min === 'number') {
     advanced.push({
-      contrast: Math.min(capabilities.contrast.max, Math.max(capabilities.contrast.min, 1.15)),
+      contrast: Math.min(capabilities.contrast.max, Math.max(capabilities.contrast.min, 1)),
     })
   }
 
@@ -129,7 +152,7 @@ const optimizeScannerTrack = async () => {
 
   if (typeof capabilities.sharpness?.max === 'number' && typeof capabilities.sharpness?.min === 'number') {
     advanced.push({
-      sharpness: Math.min(capabilities.sharpness.max, Math.max(capabilities.sharpness.min, 40)),
+      sharpness: Math.min(capabilities.sharpness.max, Math.max(capabilities.sharpness.min, 22)),
     })
   }
 
@@ -153,22 +176,17 @@ const canFlipCamera = computed(
 )
 
 const scannerFormats = [
-  BarcodeFormat.AZTEC,
   BarcodeFormat.CODABAR,
   BarcodeFormat.CODE_39,
   BarcodeFormat.CODE_93,
   BarcodeFormat.CODE_128,
-  BarcodeFormat.DATA_MATRIX,
   BarcodeFormat.EAN_8,
   BarcodeFormat.EAN_13,
   BarcodeFormat.ITF,
   BarcodeFormat.PDF_417,
   BarcodeFormat.QR_CODE,
-  BarcodeFormat.RSS_14,
-  BarcodeFormat.RSS_EXPANDED,
   BarcodeFormat.UPC_A,
   BarcodeFormat.UPC_E,
-  BarcodeFormat.UPC_EAN_EXTENSION,
 ]
 
 const clearMessages = () => {
@@ -290,9 +308,21 @@ const handleScannedCode = async (scannedValue) => {
   const now = Date.now()
 
   if (!normalizedValue || (normalizedValue === lastDetectedBadge && now - lastDetectedAt <= 1500)) {
+    // #region debug-point D:duplicate-or-empty
+    reportScannerDebug('D', 'Admin scanner ignored scanned value', {
+      normalizedValue: normalizedValue || '',
+      isDuplicate: normalizedValue === lastDetectedBadge,
+      duplicateAgeMs: now - lastDetectedAt,
+    })
+    // #endregion
     return
   }
 
+  // #region debug-point D:decoded
+  reportScannerDebug('D', 'Admin scanner decoded barcode', {
+    normalizedValue,
+  })
+  // #endregion
   lastDetectedBadge = normalizedValue
   lastDetectedAt = now
   badgeCode.value = normalizedValue
@@ -304,14 +334,33 @@ const handleScannedCode = async (scannedValue) => {
 }
 
 const startScanner = async (constraints) => {
+  // #region debug-point A:start-scanner
+  reportScannerDebug('A', 'Admin scanner starting', {
+    selectedCameraId: selectedCameraId.value || '',
+    cameraMode: cameraMode.value,
+    constraints,
+    hasVideoElement: Boolean(videoRef.value),
+    videoReadyState: videoRef.value?.readyState ?? null,
+  })
+  // #endregion
   const hints = new Map()
   hints.set(DecodeHintType.POSSIBLE_FORMATS, scannerFormats)
   hints.set(DecodeHintType.TRY_HARDER, true)
   hints.set(DecodeHintType.ALSO_INVERTED, true)
 
-  scannerReader = new BrowserMultiFormatReader(hints, 50)
-  scannerReader.timeBetweenDecodingAttempts = 10
-  scannerReader.timeBetweenScansMillis = 10
+  if (!videoRef.value) {
+    for (let attempt = 0; attempt < 8 && !videoRef.value; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 50))
+    }
+  }
+
+  if (!videoRef.value) {
+    throw new Error('Scanner preview is not ready yet.')
+  }
+
+  scannerReader = new BrowserMultiFormatReader(hints, 80)
+  scannerReader.timeBetweenDecodingAttempts = 30
+  scannerReader.timeBetweenScansMillis = 30
 
   await scannerReader.decodeFromConstraints(
     {
@@ -330,6 +379,12 @@ const startScanner = async (constraints) => {
       }
 
       if (error && !(error instanceof NotFoundException)) {
+        // #region debug-point E:scanner-error
+        reportScannerDebug('E', 'Admin scanner callback error', {
+          name: error?.name || 'UnknownError',
+          message: error?.message || '',
+        })
+        // #endregion
         scannerMessage.value = 'Scanning camera is active. Keep the barcode near the center line for instant detection.'
       }
     },
@@ -339,6 +394,7 @@ const startScanner = async (constraints) => {
 const openCamera = async () => {
   clearMessages()
   isCameraModalOpen.value = true
+  await nextTick()
 
   if (!navigator.mediaDevices?.getUserMedia) {
     errorMessage.value = 'Camera access is not available in this browser.'
@@ -356,6 +412,13 @@ const openCamera = async () => {
       selectedCameraId.value = getPreferredCameraId()
     }
 
+    // #region debug-point B:camera-ready-to-start
+    reportScannerDebug('B', 'Admin camera list prepared', {
+      availableCameraCount: availableCameras.value.length,
+      selectedCameraId: selectedCameraId.value || '',
+      cameraMode: cameraMode.value,
+    })
+    // #endregion
     await startScanner(buildScannerConstraints())
     await optimizeScannerTrack()
     scannerTuneInterval = window.setInterval(() => {
@@ -365,6 +428,12 @@ const openCamera = async () => {
     isCameraOpen.value = true
     scannerMessage.value = 'Camera is ready. Move the barcode across the scanner line. Detection is now optimized for faster reads.'
   } catch (error) {
+    // #region debug-point E:open-camera-failed
+    reportScannerDebug('E', 'Admin camera failed to open', {
+      name: error?.name || 'UnknownError',
+      message: error?.message || '',
+    })
+    // #endregion
     errorMessage.value = error.message || 'Unable to access the camera.'
     scannerMessage.value = 'Camera permission is required for scanning.'
   } finally {
