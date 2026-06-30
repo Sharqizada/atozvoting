@@ -9,6 +9,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
 import { hexToRgba, resolveBrandingColors } from '../lib/branding'
+import { isWebNfcSupported, scanSingleNfcBadge } from '../lib/nfc'
 
 const router = useRouter()
 const homeSiteLogo = ref('')
@@ -38,6 +39,7 @@ const isCameraModalOpen = ref(false)
 const isMobileTipsModalOpen = ref(false)
 const isCameraOpen = ref(false)
 const isCameraLoading = ref(false)
+const isNfcScanning = ref(false)
 const cameraMode = ref('environment')
 const availableCameras = ref([])
 const selectedCameraId = ref('')
@@ -54,6 +56,8 @@ let roundRefreshInterval = null
 let toastTimeout = null
 let hasReloadedAfterCountdown = false
 let scannerTuneInterval = null
+let nfcAbortController = null
+const canUseNfc = isWebNfcSupported()
 const brandingVars = computed(() => {
   const palette = resolveBrandingColors(brandingColors.value)
 
@@ -558,7 +562,17 @@ const stopCamera = () => {
   isCameraOpen.value = false
 }
 
+const stopNfcScan = () => {
+  if (nfcAbortController) {
+    nfcAbortController.abort()
+    nfcAbortController = null
+  }
+
+  isNfcScanning.value = false
+}
+
 const closeCameraModal = () => {
+  stopNfcScan()
   stopCamera()
   isCameraModalOpen.value = false
 }
@@ -568,7 +582,7 @@ const cancelVoteFlow = () => {
   resetPendingVote()
 }
 
-const prepareBadgeForVote = async (fromScanner = false) => {
+const prepareBadgeForVote = async (source = 'manual') => {
   clearMessages()
 
   if (!pendingVoteCard.value) {
@@ -596,9 +610,11 @@ const prepareBadgeForVote = async (fromScanner = false) => {
     }
 
     setSuccess(
-      fromScanner
+      source === 'barcode'
         ? 'Badge scanned successfully. Press confirm to submit the vote.'
-        : 'Badge checked successfully. Press confirm to submit the vote.',
+        : source === 'nfc'
+          ? 'Badge tapped successfully. Press confirm to submit the vote.'
+          : 'Badge checked successfully. Press confirm to submit the vote.',
       'Badge Verified',
     )
 
@@ -609,6 +625,45 @@ const prepareBadgeForVote = async (fromScanner = false) => {
     return false
   } finally {
     isPreparingVote.value = false
+  }
+}
+
+const readBadgeWithNfc = async () => {
+  clearMessages()
+
+  if (!pendingVoteCard.value) {
+    setError('Select a nominee card first.')
+    return
+  }
+
+  if (isNfcScanning.value) {
+    stopNfcScan()
+    return
+  }
+
+  isNfcScanning.value = true
+  nfcAbortController = new AbortController()
+
+  try {
+    const scannedBadgeId = await scanSingleNfcBadge({
+      signal: nfcAbortController.signal,
+      onStatus: (message) => {
+        scannerMessage.value = message
+      },
+    })
+
+    badgeId.value = scannedBadgeId
+    scannerMessage.value = `NFC badge detected: ${scannedBadgeId}`
+    await playScanBeep()
+    await prepareBadgeForVote('nfc')
+  } catch (error) {
+    if (error?.name !== 'AbortError') {
+      setError(error.message || 'Unable to read the NFC badge.')
+      scannerMessage.value = 'NFC reading is not available right now.'
+    }
+  } finally {
+    nfcAbortController = null
+    isNfcScanning.value = false
   }
 }
 
@@ -626,7 +681,7 @@ const handleScannedCode = async (scannedValue) => {
   scannerMessage.value = `Badge detected: ${normalizedValue}`
 
   await playScanBeep()
-  const isReady = await prepareBadgeForVote(true)
+  const isReady = await prepareBadgeForVote('barcode')
 
   if (isReady) {
     stopCamera()
@@ -747,7 +802,7 @@ const confirmVote = async () => {
   }
 
   if (!verifiedVoter.value) {
-    const isReady = await prepareBadgeForVote(false)
+    const isReady = await prepareBadgeForVote()
 
     if (!isReady) {
       return
@@ -802,6 +857,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  stopNfcScan()
   stopCamera()
 
   if (countdownInterval) {
@@ -1421,6 +1477,15 @@ onBeforeUnmount(() => {
                 class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
               />
             </div>
+            <button
+              v-if="canUseNfc"
+              type="button"
+              @click="readBadgeWithNfc"
+              :disabled="isPreparingVote || isSubmitting"
+              class="public-brand-outline inline-flex h-[58px] shrink-0 items-center justify-center border-l border-slate-200 bg-white px-4 text-slate-700 transition disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span class="material-symbols-outlined text-lg">{{ isNfcScanning ? 'close' : 'nfc' }}</span>
+            </button>
             <button
               type="button"
               @click="prepareBadgeForVote"

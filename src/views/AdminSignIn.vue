@@ -9,6 +9,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
 import { hexToRgba, resolveBrandingColors } from '../lib/branding'
+import { isWebNfcSupported, scanSingleNfcBadge } from '../lib/nfc'
 
 const router = useRouter()
 const DEV_LOGIN_BADGE = '15357920'
@@ -30,6 +31,7 @@ const scannerMessage = ref('Starting camera...')
 const isCameraModalOpen = ref(false)
 const isCameraOpen = ref(false)
 const isCameraLoading = ref(false)
+const isNfcScanning = ref(false)
 const cameraMode = ref('environment')
 const availableCameras = ref([])
 const selectedCameraId = ref('')
@@ -40,29 +42,8 @@ let lastDetectedBadge = ''
 let lastDetectedAt = 0
 let audioContext = null
 let scannerTuneInterval = null
-const isLocalScannerDebugRuntime =
-  import.meta.env.DEV &&
-  typeof window !== 'undefined' &&
-  ['localhost', '127.0.0.1'].includes(window.location.hostname)
-// #region debug-point A:reporter
-const reportScannerDebug = (hypothesisId, msg, data = {}, runId = 'post-fix') =>
-  !isLocalScannerDebugRuntime
-    ? Promise.resolve()
-    :
-  fetch('http://127.0.0.1:7777/event', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: 'barcode-scan-failure',
-      runId,
-      hypothesisId,
-      location: 'AdminSignIn.vue',
-      msg: `[DEBUG] ${msg}`,
-      data,
-      ts: Date.now(),
-    }),
-  }).catch(() => {})
-// #endregion
+let nfcAbortController = null
+const canUseNfc = isWebNfcSupported()
 const brandingVars = computed(() => {
   const palette = resolveBrandingColors(brandingColors.value)
 
@@ -248,6 +229,15 @@ const closeCameraModal = () => {
   isCameraModalOpen.value = false
 }
 
+const stopNfcScan = () => {
+  if (nfcAbortController) {
+    nfcAbortController.abort()
+    nfcAbortController = null
+  }
+
+  isNfcScanning.value = false
+}
+
 const refreshCameraList = async () => {
   if (!navigator.mediaDevices?.enumerateDevices) {
     return
@@ -308,21 +298,9 @@ const handleScannedCode = async (scannedValue) => {
   const now = Date.now()
 
   if (!normalizedValue || (normalizedValue === lastDetectedBadge && now - lastDetectedAt <= 1500)) {
-    // #region debug-point D:duplicate-or-empty
-    reportScannerDebug('D', 'Admin scanner ignored scanned value', {
-      normalizedValue: normalizedValue || '',
-      isDuplicate: normalizedValue === lastDetectedBadge,
-      duplicateAgeMs: now - lastDetectedAt,
-    })
-    // #endregion
     return
   }
 
-  // #region debug-point D:decoded
-  reportScannerDebug('D', 'Admin scanner decoded barcode', {
-    normalizedValue,
-  })
-  // #endregion
   lastDetectedBadge = normalizedValue
   lastDetectedAt = now
   badgeCode.value = normalizedValue
@@ -330,19 +308,10 @@ const handleScannedCode = async (scannedValue) => {
 
   await playScanBeep()
   closeCameraModal()
-  await verifyBadge(true)
+  await verifyBadge('barcode')
 }
 
 const startScanner = async (constraints) => {
-  // #region debug-point A:start-scanner
-  reportScannerDebug('A', 'Admin scanner starting', {
-    selectedCameraId: selectedCameraId.value || '',
-    cameraMode: cameraMode.value,
-    constraints,
-    hasVideoElement: Boolean(videoRef.value),
-    videoReadyState: videoRef.value?.readyState ?? null,
-  })
-  // #endregion
   const hints = new Map()
   hints.set(DecodeHintType.POSSIBLE_FORMATS, scannerFormats)
   hints.set(DecodeHintType.TRY_HARDER, true)
@@ -379,12 +348,6 @@ const startScanner = async (constraints) => {
       }
 
       if (error && !(error instanceof NotFoundException)) {
-        // #region debug-point E:scanner-error
-        reportScannerDebug('E', 'Admin scanner callback error', {
-          name: error?.name || 'UnknownError',
-          message: error?.message || '',
-        })
-        // #endregion
         scannerMessage.value = 'Scanning camera is active. Keep the barcode near the center line for instant detection.'
       }
     },
@@ -412,13 +375,6 @@ const openCamera = async () => {
       selectedCameraId.value = getPreferredCameraId()
     }
 
-    // #region debug-point B:camera-ready-to-start
-    reportScannerDebug('B', 'Admin camera list prepared', {
-      availableCameraCount: availableCameras.value.length,
-      selectedCameraId: selectedCameraId.value || '',
-      cameraMode: cameraMode.value,
-    })
-    // #endregion
     await startScanner(buildScannerConstraints())
     await optimizeScannerTrack()
     scannerTuneInterval = window.setInterval(() => {
@@ -428,12 +384,6 @@ const openCamera = async () => {
     isCameraOpen.value = true
     scannerMessage.value = 'Camera is ready. Move the barcode across the scanner line. Detection is now optimized for faster reads.'
   } catch (error) {
-    // #region debug-point E:open-camera-failed
-    reportScannerDebug('E', 'Admin camera failed to open', {
-      name: error?.name || 'UnknownError',
-      message: error?.message || '',
-    })
-    // #endregion
     errorMessage.value = error.message || 'Unable to access the camera.'
     scannerMessage.value = 'Camera permission is required for scanning.'
   } finally {
@@ -458,7 +408,7 @@ const switchCamera = async () => {
   await openCamera()
 }
 
-const verifyBadge = async (fromScanner = false) => {
+const verifyBadge = async (source = 'manual') => {
   clearMessages()
 
   if (!badgeCode.value.trim()) {
@@ -474,9 +424,12 @@ const verifyBadge = async (fromScanner = false) => {
     })
 
     detectedAdmin.value = data.admin
-    successMessage.value = fromScanner
-      ? 'Badge Scanned and Verified Successfully'
-      : 'Badge verified successfully.'
+    successMessage.value =
+      source === 'barcode'
+        ? 'Badge scanned and verified successfully.'
+        : source === 'nfc'
+          ? 'Badge tapped and verified successfully.'
+          : 'Badge verified successfully.'
 
     return true
   } catch (error) {
@@ -485,6 +438,40 @@ const verifyBadge = async (fromScanner = false) => {
     return false
   } finally {
     isVerifyingBadge.value = false
+  }
+}
+
+const readBadgeWithNfc = async () => {
+  clearMessages()
+
+  if (isNfcScanning.value) {
+    stopNfcScan()
+    return
+  }
+
+  isNfcScanning.value = true
+  nfcAbortController = new AbortController()
+
+  try {
+    const scannedBadgeId = await scanSingleNfcBadge({
+      signal: nfcAbortController.signal,
+      onStatus: (message) => {
+        successMessage.value = message
+      },
+    })
+
+    badgeCode.value = scannedBadgeId
+    detectedAdmin.value = null
+    await playScanBeep()
+    await verifyBadge('nfc')
+  } catch (error) {
+    if (error?.name !== 'AbortError') {
+      errorMessage.value = error.message || 'Unable to read the NFC badge.'
+      successMessage.value = ''
+    }
+  } finally {
+    nfcAbortController = null
+    isNfcScanning.value = false
   }
 }
 
@@ -531,6 +518,7 @@ const submitLogin = async () => {
 onMounted(loadBranding)
 
 onBeforeUnmount(() => {
+  stopNfcScan()
   stopCamera()
 })
 </script>
@@ -568,6 +556,14 @@ onBeforeUnmount(() => {
                   class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
                 />
               </div>
+              <button
+                v-if="canUseNfc"
+                type="button"
+                @click="readBadgeWithNfc"
+                class="login-brand-outline inline-flex h-[58px] w-16 shrink-0 items-center justify-center border-l border-slate-200 bg-white text-slate-700 transition"
+              >
+                <span class="material-symbols-outlined text-lg">{{ isNfcScanning ? 'close' : 'nfc' }}</span>
+              </button>
               <button
                 type="button"
                 @click="openCamera"
