@@ -4988,7 +4988,7 @@ app.get('/api/rosters-v2', async (_req, res) => {
     const stationRows = await getStationsV2()
     const employeeOptions = await query(
       `
-        SELECT id, badge_id, full_name, department_name, role_name, employment_status, photo_data
+        SELECT id, badge_id, badge_username, full_name, department_name, role_name, employment_status, photo_data
         FROM employees
         WHERE employment_status = 'ACTIVE'
         ORDER BY full_name ASC

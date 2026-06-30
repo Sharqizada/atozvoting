@@ -36,6 +36,7 @@ const showStationsModal = ref(false)
 const showStationListModal = ref(false)
 const showAssignmentEditorModal = ref(false)
 const showSectionSummaryModal = ref(false)
+const showSummaryMetricModal = ref(false)
 const showSwapModal = ref(false)
 const editingRosterId = ref(null)
 const submitError = ref('')
@@ -75,6 +76,11 @@ const sectionSummaryModalState = reactive({
   title: '',
   associates: [],
   assignedStations: 0,
+})
+const summaryMetricModalState = reactive({
+  title: '',
+  description: '',
+  items: [],
 })
 
 const filteredRosters = computed(() =>
@@ -169,6 +175,48 @@ const assignedStationCount = computed(
 const farAwayAssignedCount = computed(() =>
   createForm.assignments.filter((assignment) => stationLookup.value[assignment.stationId]?.isFarAway).length,
 )
+const assignedStationItems = computed(() =>
+  createForm.assignments
+    .filter((assignment) => Number(assignment.stationId))
+    .map((assignment) => {
+      const employee = employeeLookup.value[assignment.employeeId]
+      const station = stationLookup.value[assignment.stationId]
+
+      if (!employee || !station) {
+        return null
+      }
+
+      return {
+        id: `${assignment.employeeId}-${assignment.stationId}`,
+        employee,
+        assignment,
+        station,
+      }
+    })
+    .filter(Boolean),
+)
+const farAwayAssignedItems = computed(() =>
+  assignedStationItems.value.filter((entry) => entry.station?.isFarAway),
+)
+const unassignedStationItems = computed(() =>
+  createForm.assignments
+    .filter((assignment) => !Number(assignment.stationId))
+    .map((assignment) => {
+      const employee = employeeLookup.value[assignment.employeeId]
+
+      if (!employee) {
+        return null
+      }
+
+      return {
+        id: `${assignment.employeeId}-unassigned`,
+        employee,
+        assignment,
+        station: null,
+      }
+    })
+    .filter(Boolean),
+)
 
 const paginationLabel = computed(
   () => `Showing 1 to ${filteredRosters.value.length} of ${rosters.value.length} rosters`,
@@ -202,6 +250,7 @@ const formatStationTypeLabel = (stationType) => {
 
   return 'Universal Station'
 }
+const getBadgeUsernameLabel = (value) => `${value || ''}`.trim() || 'Unknown'
 const isDetailCompatibleWithFloor = (sectionKey, detailKey, floorCode) => {
   const normalizedSectionKey = normalizeSectionKey(sectionKey)
   const normalizedDetailKey = `${detailKey || ''}`.trim().toUpperCase()
@@ -421,6 +470,31 @@ const closeSectionSummaryModal = () => {
   sectionSummaryModalState.title = ''
   sectionSummaryModalState.associates = []
   sectionSummaryModalState.assignedStations = 0
+}
+
+const closeSummaryMetricModal = () => {
+  showSummaryMetricModal.value = false
+  summaryMetricModalState.title = ''
+  summaryMetricModalState.description = ''
+  summaryMetricModalState.items = []
+}
+
+const openSummaryMetricModal = (type) => {
+  if (type === 'stations') {
+    summaryMetricModalState.title = 'Assigned Stations'
+    summaryMetricModalState.description = 'All associates that currently have a station assignment.'
+    summaryMetricModalState.items = assignedStationItems.value
+  } else if (type === 'farAway') {
+    summaryMetricModalState.title = 'Far Away Stations'
+    summaryMetricModalState.description = 'Associates currently assigned to far away stations.'
+    summaryMetricModalState.items = farAwayAssignedItems.value
+  } else {
+    summaryMetricModalState.title = 'Unassigned Stations'
+    summaryMetricModalState.description = 'Associates that do not have any station assigned yet.'
+    summaryMetricModalState.items = unassignedStationItems.value
+  }
+
+  showSummaryMetricModal.value = true
 }
 
 const openSectionSummaryModal = (section) => {
@@ -913,18 +987,30 @@ const deleteRoster = async (roster) => {
                 </div>
 
                 <div class="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div class="rounded-2xl border border-white bg-white px-4 py-3">
+                  <button
+                    type="button"
+                    @click="openSummaryMetricModal('stations')"
+                    class="rounded-2xl border border-white bg-white px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50/60"
+                  >
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Stations</p>
                     <p class="mt-2 text-2xl font-semibold text-slate-900">{{ assignedStationCount }}</p>
-                  </div>
-                  <div class="rounded-2xl border border-white bg-white px-4 py-3">
+                  </button>
+                  <button
+                    type="button"
+                    @click="openSummaryMetricModal('farAway')"
+                    class="rounded-2xl border border-white bg-white px-4 py-3 text-left transition hover:border-amber-200 hover:bg-amber-50/60"
+                  >
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Far Away</p>
                     <p class="mt-2 text-2xl font-semibold text-slate-900">{{ farAwayAssignedCount }}</p>
-                  </div>
-                  <div class="rounded-2xl border border-white bg-white px-4 py-3">
+                  </button>
+                  <button
+                    type="button"
+                    @click="openSummaryMetricModal('unassigned')"
+                    class="rounded-2xl border border-white bg-white px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
+                  >
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Unassigned</p>
                     <p class="mt-2 text-2xl font-semibold text-slate-900">{{ assignedCount - assignedStationCount }}</p>
-                  </div>
+                  </button>
                 </div>
 
                 <div class="mt-4 space-y-3">
@@ -969,51 +1055,53 @@ const deleteRoster = async (roster) => {
                 </div>
               </div>
 
-              <div class="max-h-[480px] space-y-3 overflow-y-auto px-5 py-4">
+              <div class="max-h-[480px] overflow-y-auto px-5 py-4">
                 <div class="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
                   Shared stations are managed from `Add Stations`. Choosing an occupied one-person station will open a swap dialog.
                 </div>
 
-                <article
-                  v-for="employee in filteredEmployeeOptions"
-                  :key="employee.id"
-                  class="rounded-2xl border border-slate-200 px-4 py-4"
-                >
-                  <div class="flex items-start justify-between gap-4">
-                    <div class="flex min-w-0 items-center gap-3">
-                      <img
-                        v-if="employee.photoData"
-                        :src="employee.photoData"
-                        :alt="employee.fullName"
-                        class="h-11 w-11 rounded-full object-cover"
-                      />
-                      <div
-                        v-else
-                        class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-slate-600"
+                <div class="mt-3 grid gap-3 lg:grid-cols-2">
+                  <article
+                    v-for="employee in filteredEmployeeOptions"
+                    :key="employee.id"
+                    class="rounded-2xl border border-slate-200 px-4 py-4"
+                  >
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="flex min-w-0 items-center gap-3">
+                        <img
+                          v-if="employee.photoData"
+                          :src="employee.photoData"
+                          :alt="employee.fullName"
+                          class="h-11 w-11 rounded-full object-cover"
+                        />
+                        <div
+                          v-else
+                          class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-200 text-slate-600"
+                        >
+                          <span class="material-symbols-outlined text-base">person</span>
+                        </div>
+                        <div class="min-w-0">
+                          <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
+                          <p class="mt-1 text-xs text-slate-400">
+                            {{ employee.badgeId }} | {{ getBadgeUsernameLabel(employee.badgeUsername) }} | {{ employee.departmentName }} / {{ employee.roleName }}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        @click="openAssignmentEditorModal(employee.id)"
+                        title="View station details"
+                        class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700"
                       >
-                        <span class="material-symbols-outlined text-base">person</span>
-                      </div>
-                      <div class="min-w-0">
-                        <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
-                        <p class="mt-1 text-xs text-slate-400">
-                          {{ employee.badgeId }}<span v-if="employee.badgeUsername"> | {{ employee.badgeUsername }}</span> | {{ employee.departmentName }} / {{ employee.roleName }}
-                        </p>
-                      </div>
+                        <span class="material-symbols-outlined text-base">edit_note</span>
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      @click="openAssignmentEditorModal(employee.id)"
-                      class="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"
-                    >
-                      <span class="material-symbols-outlined text-base">edit_note</span>
-                      View Station Details
-                    </button>
-                  </div>
 
-                  <div class="mt-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-                    {{ getAssignmentCardSummary(employee.id) }}
-                  </div>
-                </article>
+                    <div class="mt-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-xs text-slate-500">
+                      {{ getAssignmentCardSummary(employee.id) }}
+                    </div>
+                  </article>
+                </div>
 
                 <div
                   v-if="!filteredEmployeeOptions.length"
@@ -1056,7 +1144,7 @@ const deleteRoster = async (roster) => {
             <p class="text-xl font-semibold text-slate-900">Edit Associate Assignment</p>
             <p class="mt-1 text-sm text-slate-500">
               {{ activeAssignmentEmployee.fullName }} | {{ activeAssignmentEmployee.badgeId }}
-              <span v-if="activeAssignmentEmployee.badgeUsername">| {{ activeAssignmentEmployee.badgeUsername }}</span>
+              | {{ getBadgeUsernameLabel(activeAssignmentEmployee.badgeUsername) }}
             </p>
           </div>
           <button
@@ -1177,7 +1265,7 @@ const deleteRoster = async (roster) => {
                 <div class="min-w-0">
                   <p class="font-semibold text-slate-900">{{ associate.fullName }}</p>
                   <p class="mt-1 text-xs text-slate-500">
-                    {{ associate.badgeId }}<span v-if="associate.badgeUsername"> | {{ associate.badgeUsername }}</span>
+                    {{ associate.badgeId }} | {{ getBadgeUsernameLabel(associate.badgeUsername) }}
                   </p>
                 </div>
                 <span class="rounded-full bg-white px-3 py-1 text-xs text-slate-600">
@@ -1211,6 +1299,83 @@ const deleteRoster = async (roster) => {
             class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500"
           >
             No associates assigned yet.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showSummaryMetricModal"
+      class="fixed inset-0 z-[61] flex items-center justify-center bg-slate-950/50 px-4 py-4"
+    >
+      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">{{ summaryMetricModalState.title }}</p>
+            <p class="mt-1 text-sm text-slate-500">{{ summaryMetricModalState.description }}</p>
+          </div>
+          <button
+            type="button"
+            @click="closeSummaryMetricModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div v-if="summaryMetricModalState.items.length" class="grid gap-3 sm:grid-cols-2">
+            <div
+              v-for="item in summaryMetricModalState.items"
+              :key="item.id"
+              class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-semibold text-slate-900">{{ item.employee.fullName }}</p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ item.employee.badgeId }} | {{ getBadgeUsernameLabel(item.employee.badgeUsername) }}
+                  </p>
+                </div>
+                <span class="rounded-full bg-white px-3 py-1 text-xs text-slate-600">
+                  {{ item.assignment.floorCode || 'No floor' }}
+                </span>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <span
+                  class="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-600"
+                >
+                  {{
+                    rosterSections.find((section) => section.key === item.assignment.sectionKey)?.label ||
+                    item.assignment.sectionKey
+                  }}
+                </span>
+                <span
+                  v-if="item.assignment.detailKey"
+                  class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-600"
+                >
+                  {{ getSectionDetailLabel(item.assignment.sectionKey, item.assignment.detailKey) }}
+                </span>
+                <span
+                  v-if="item.station"
+                  class="rounded-full bg-violet-50 px-3 py-1 text-xs text-violet-600"
+                >
+                  {{ item.station.displayLabel }}
+                </span>
+                <span
+                  v-else
+                  class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500"
+                >
+                  No station assigned
+                </span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else
+            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500"
+          >
+            No records found for this summary.
           </div>
         </div>
       </div>
@@ -1278,7 +1443,7 @@ const deleteRoster = async (roster) => {
               </div>
             </div>
 
-            <div class="grid gap-5">
+            <div class="grid gap-5 md:grid-cols-2">
               <section
                 v-for="group in stationGroups"
                 :key="group.floorCode"
@@ -1310,7 +1475,7 @@ const deleteRoster = async (roster) => {
                 </div>
               </section>
 
-              <section class="rounded-3xl border border-amber-200 bg-amber-50/60 p-5">
+              <section class="rounded-3xl border border-amber-200 bg-amber-50/60 p-5 md:col-span-2">
                 <div class="flex items-center justify-between gap-3">
                   <div>
                     <p class="text-lg font-semibold text-slate-900">Far Away Stations</p>
