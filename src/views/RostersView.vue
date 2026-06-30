@@ -4,10 +4,13 @@ import AdminShell from '../components/AdminShell.vue'
 import { useAdminPage } from '../composables/useAdminPage'
 import { deleteJson, postJson, putJson } from '../lib/api'
 
-const { data, error, load } = useAdminPage('/api/rosters', {
+const { data, error, load } = useAdminPage('/api/rosters-v2', {
   stats: [],
   rosters: [],
   rosterSections: [],
+  floors: ['P2', 'P3', 'P4'],
+  stationTypes: ['AR', 'UNIVERSAL'],
+  stations: [],
   employeeOptions: [],
   pagination: {
     showing: '',
@@ -17,19 +20,37 @@ const { data, error, load } = useAdminPage('/api/rosters', {
 const stats = computed(() => data.value.stats || [])
 const rosters = computed(() => data.value.rosters || [])
 const rosterSections = computed(() => data.value.rosterSections || [])
+const floors = computed(() => data.value.floors || ['P2', 'P3', 'P4'])
+const stationTypes = computed(() => data.value.stationTypes || ['AR', 'UNIVERSAL'])
+const stations = computed(() => data.value.stations || [])
 const employeeOptions = computed(() => data.value.employeeOptions || [])
 const searchTerm = ref('')
 const employeeSearch = ref('')
 const showCreateModal = ref(false)
+const showStationsModal = ref(false)
+const showSwapModal = ref(false)
 const editingRosterId = ref(null)
 const submitError = ref('')
 const submitSuccess = ref('')
 const isSubmitting = ref(false)
 const isUpdatingHomeVisibility = ref(false)
+const isSavingStation = ref(false)
+const deletingStationId = ref(null)
 const createForm = reactive({
   name: '',
   description: '',
   assignments: [],
+})
+const stationForm = reactive({
+  floorCode: 'P2',
+  stationCode: '',
+  stationType: 'AR',
+  isFarAway: false,
+})
+const pendingSwap = reactive({
+  employeeId: null,
+  targetStationId: null,
+  occupiedEmployeeId: null,
 })
 
 const filteredRosters = computed(() =>
@@ -47,31 +68,118 @@ const filteredEmployeeOptions = computed(() =>
   }),
 )
 
+const employeeLookup = computed(() =>
+  employeeOptions.value.reduce((accumulator, employee) => {
+    accumulator[employee.id] = employee
+    return accumulator
+  }, {}),
+)
+
+const stationLookup = computed(() =>
+  stations.value.reduce((accumulator, station) => {
+    accumulator[station.id] = station
+    return accumulator
+  }, {}),
+)
+
 const assignmentLookup = computed(() =>
   createForm.assignments.reduce((accumulator, assignment) => {
-    accumulator[assignment.employeeId] = assignment.sectionKey
+    accumulator[assignment.employeeId] = assignment
+    return accumulator
+  }, {}),
+)
+
+const stationOccupancyLookup = computed(() =>
+  createForm.assignments.reduce((accumulator, assignment) => {
+    if (assignment.stationId) {
+      accumulator[assignment.stationId] = assignment.employeeId
+    }
     return accumulator
   }, {}),
 )
 
 const sectionSummary = computed(() =>
-  rosterSections.value.map((section) => ({
-    ...section,
-    associates: createForm.assignments
+  rosterSections.value.map((section) => {
+    const associates = createForm.assignments
       .filter((assignment) => assignment.sectionKey === section.key)
-      .map((assignment) => employeeOptions.value.find((employee) => employee.id === assignment.employeeId))
-      .filter(Boolean),
+      .map((assignment) => {
+        const employee = employeeLookup.value[assignment.employeeId]
+        const station = stationLookup.value[assignment.stationId]
+
+        if (!employee) {
+          return null
+        }
+
+        return {
+          ...employee,
+          station,
+        }
+      })
+      .filter(Boolean)
+
+    return {
+      ...section,
+      associates,
+      assignedStations: associates.filter((associate) => associate.station).length,
+    }
+  }),
+)
+
+const stationGroups = computed(() =>
+  floors.value.map((floorCode) => ({
+    floorCode,
+    title: `${floorCode} Stations`,
+    stations: stations.value.filter((station) => !station.isFarAway && station.floorCode === floorCode),
   })),
+)
+
+const farAwayStations = computed(() => stations.value.filter((station) => station.isFarAway))
+const assignedCount = computed(() => createForm.assignments.length)
+const assignedStationCount = computed(
+  () => createForm.assignments.filter((assignment) => Number(assignment.stationId)).length,
+)
+const farAwayAssignedCount = computed(() =>
+  createForm.assignments.filter((assignment) => stationLookup.value[assignment.stationId]?.isFarAway).length,
 )
 
 const paginationLabel = computed(
   () => `Showing 1 to ${filteredRosters.value.length} of ${rosters.value.length} rosters`,
 )
 
+const shuffleItems = (items) => {
+  const cloned = [...items]
+
+  for (let index = cloned.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    ;[cloned[index], cloned[randomIndex]] = [cloned[randomIndex], cloned[index]]
+  }
+
+  return cloned
+}
+
+const buildDefaultAssignments = () => {
+  const normalStations = shuffleItems(stations.value.filter((station) => !station.isFarAway))
+  const farStations = shuffleItems(stations.value.filter((station) => station.isFarAway))
+  const stationPool = [...normalStations, ...farStations]
+
+  return employeeOptions.value.map((employee, index) => ({
+    employeeId: employee.id,
+    sectionKey: 'STOW',
+    stationId: stationPool[index]?.id || null,
+  }))
+}
+
 const resetForm = () => {
   createForm.name = ''
   createForm.description = ''
   createForm.assignments = []
+}
+
+const resetStationForm = () => {
+  stationForm.floorCode = floors.value[0] || 'P2'
+  stationForm.stationCode = ''
+  stationForm.stationType = stationTypes.value[0] || 'AR'
+  stationForm.isFarAway = false
 }
 
 const openCreateModal = () => {
@@ -80,6 +188,7 @@ const openCreateModal = () => {
   employeeSearch.value = ''
   editingRosterId.value = null
   resetForm()
+  createForm.assignments = buildDefaultAssignments()
   showCreateModal.value = true
 }
 
@@ -94,6 +203,7 @@ const openEditModal = (roster) => {
     (section.associates || []).map((associate) => ({
       employeeId: associate.id,
       sectionKey: section.key,
+      stationId: associate.stationId || null,
     })),
   )
   showCreateModal.value = true
@@ -103,16 +213,144 @@ const closeCreateModal = () => {
   showCreateModal.value = false
 }
 
-const setEmployeeSection = (employeeId, sectionKey) => {
-  const normalizedSectionKey = `${sectionKey || ''}`.trim().toUpperCase()
+const openStationsModal = () => {
+  submitError.value = ''
+  submitSuccess.value = ''
+  resetStationForm()
+  showStationsModal.value = true
+}
+
+const closeStationsModal = () => {
+  showStationsModal.value = false
+}
+
+const updateAssignment = (employeeId, nextAssignment) => {
   const currentAssignments = createForm.assignments.filter((assignment) => assignment.employeeId !== employeeId)
 
-  if (!normalizedSectionKey) {
+  if (!nextAssignment?.sectionKey) {
     createForm.assignments = currentAssignments
     return
   }
 
-  createForm.assignments = [...currentAssignments, { employeeId, sectionKey: normalizedSectionKey }]
+  createForm.assignments = [
+    ...currentAssignments,
+    {
+      employeeId,
+      sectionKey: `${nextAssignment.sectionKey}`.trim().toUpperCase(),
+      stationId: Number(nextAssignment.stationId) || null,
+    },
+  ]
+}
+
+const setEmployeeSection = (employeeId, sectionKey) => {
+  const normalizedSectionKey = `${sectionKey || ''}`.trim().toUpperCase()
+  const currentAssignment = assignmentLookup.value[employeeId]
+
+  if (!normalizedSectionKey) {
+    updateAssignment(employeeId, null)
+    return
+  }
+
+  updateAssignment(employeeId, {
+    employeeId,
+    sectionKey: normalizedSectionKey,
+    stationId: currentAssignment?.stationId || null,
+  })
+}
+
+const assignStationToEmployee = (employeeId, stationId) => {
+  const currentAssignment = assignmentLookup.value[employeeId]
+
+  updateAssignment(employeeId, {
+    employeeId,
+    sectionKey: currentAssignment?.sectionKey || 'STOW',
+    stationId,
+  })
+}
+
+const requestStationAssignment = (employeeId, rawStationId) => {
+  const stationId = Number(rawStationId) || null
+
+  if (!stationId) {
+    assignStationToEmployee(employeeId, null)
+    return
+  }
+
+  const occupiedEmployeeId = stationOccupancyLookup.value[stationId]
+
+  if (occupiedEmployeeId && occupiedEmployeeId !== employeeId) {
+    pendingSwap.employeeId = employeeId
+    pendingSwap.targetStationId = stationId
+    pendingSwap.occupiedEmployeeId = occupiedEmployeeId
+    showSwapModal.value = true
+    return
+  }
+
+  assignStationToEmployee(employeeId, stationId)
+}
+
+const closeSwapModal = () => {
+  pendingSwap.employeeId = null
+  pendingSwap.targetStationId = null
+  pendingSwap.occupiedEmployeeId = null
+  showSwapModal.value = false
+}
+
+const confirmStationSwap = () => {
+  const sourceEmployeeId = pendingSwap.employeeId
+  const targetStationId = pendingSwap.targetStationId
+  const occupiedEmployeeId = pendingSwap.occupiedEmployeeId
+
+  if (!sourceEmployeeId || !targetStationId || !occupiedEmployeeId) {
+    closeSwapModal()
+    return
+  }
+
+  const sourceAssignment = assignmentLookup.value[sourceEmployeeId]
+  const occupiedAssignment = assignmentLookup.value[occupiedEmployeeId]
+  const previousStationId = sourceAssignment?.stationId || null
+
+  assignStationToEmployee(sourceEmployeeId, targetStationId)
+  assignStationToEmployee(occupiedEmployeeId, previousStationId)
+  closeSwapModal()
+}
+
+const saveStation = async () => {
+  submitError.value = ''
+  submitSuccess.value = ''
+  isSavingStation.value = true
+
+  try {
+    const response = await postJson('/api/stations-v2', { ...stationForm })
+    submitSuccess.value = response.message || 'Station added successfully.'
+    resetStationForm()
+    await load()
+  } catch (requestError) {
+    submitError.value = requestError.message || 'Unable to save station.'
+  } finally {
+    isSavingStation.value = false
+  }
+}
+
+const deleteStation = async (station) => {
+  submitError.value = ''
+  submitSuccess.value = ''
+
+  if (!window.confirm(`Delete station "${station.displayLabel}"?`)) {
+    return
+  }
+
+  deletingStationId.value = station.id
+
+  try {
+    const response = await deleteJson(`/api/stations-v2/${station.id}`)
+    submitSuccess.value = response.message || 'Station deleted successfully.'
+    await load()
+  } catch (requestError) {
+    submitError.value = requestError.message || 'Unable to delete station.'
+  } finally {
+    deletingStationId.value = null
+  }
 }
 
 const submitRoster = async () => {
@@ -128,10 +366,10 @@ const submitRoster = async () => {
     }
 
     if (editingRosterId.value) {
-      await putJson(`/api/rosters/${editingRosterId.value}`, payload)
+      await putJson(`/api/rosters-v2/${editingRosterId.value}`, payload)
       submitSuccess.value = 'Roster updated successfully.'
     } else {
-      await postJson('/api/rosters', payload)
+      await postJson('/api/rosters-v2', payload)
       submitSuccess.value = 'Roster created successfully.'
     }
 
@@ -150,7 +388,7 @@ const toggleHomeVisibility = async (roster) => {
   isUpdatingHomeVisibility.value = true
 
   try {
-    const response = await postJson(`/api/rosters/${roster.id}/home-visibility`, {
+    const response = await postJson(`/api/rosters-v2/${roster.id}/home-visibility`, {
       visible: !roster.homeVisibility,
     })
     submitSuccess.value =
@@ -175,7 +413,7 @@ const deleteRoster = async (roster) => {
   }
 
   try {
-    await deleteJson(`/api/rosters/${roster.id}`)
+    await deleteJson(`/api/rosters-v2/${roster.id}`)
     submitSuccess.value = 'Roster deleted successfully.'
     await load()
   } catch (requestError) {
@@ -223,7 +461,7 @@ const deleteRoster = async (roster) => {
           <div>
             <p class="text-lg font-semibold text-slate-900">All Rosters</p>
             <p class="mt-1 text-sm text-slate-500">
-              Manage roster pages and choose which roster can appear on the Home page.
+              Manage roster pages, shared floor stations, and choose which roster can appear on the Home page.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-3">
@@ -238,6 +476,14 @@ const deleteRoster = async (roster) => {
                 class="h-11 w-full min-w-[220px] rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none"
               />
             </div>
+            <button
+              type="button"
+              @click="openStationsModal"
+              class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700"
+            >
+              <span class="material-symbols-outlined text-base">pin_drop</span>
+              Add Stations
+            </button>
             <button
               type="button"
               @click="openCreateModal"
@@ -268,6 +514,10 @@ const deleteRoster = async (roster) => {
                 <p class="font-semibold text-slate-800">{{ roster.name }}</p>
                 <p class="mt-1 text-xs text-slate-400">{{ roster.description || 'No roster description provided.' }}</p>
                 <p class="mt-2 text-xs text-slate-400">Created by {{ roster.creator }}</p>
+                <p class="mt-2 text-xs text-slate-400">
+                  {{ roster.assignedStationCount || 0 }} stations assigned
+                  <span v-if="roster.farAwayAssignedCount"> · {{ roster.farAwayAssignedCount }} far away</span>
+                </p>
               </td>
               <td class="px-4 py-5">
                 <div class="flex flex-wrap gap-2">
@@ -354,7 +604,7 @@ const deleteRoster = async (roster) => {
           <div>
             <p class="text-xl font-semibold text-slate-900">{{ editingRosterId ? 'Edit Roster' : 'Create Roster' }}</p>
             <p class="mt-1 text-sm text-slate-500">
-              Assign associates to the roster sections, then choose from the table if it should show on the Home page.
+              All active associates start in `Stow` with random station IDs, then you can change section and station assignments below.
             </p>
           </div>
           <button
@@ -400,6 +650,21 @@ const deleteRoster = async (roster) => {
                   </span>
                 </div>
 
+                <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div class="rounded-2xl border border-white bg-white px-4 py-3">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Stations</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-900">{{ assignedStationCount }}</p>
+                  </div>
+                  <div class="rounded-2xl border border-white bg-white px-4 py-3">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Far Away</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-900">{{ farAwayAssignedCount }}</p>
+                  </div>
+                  <div class="rounded-2xl border border-white bg-white px-4 py-3">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Unassigned</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-900">{{ assignedCount - assignedStationCount }}</p>
+                  </div>
+                </div>
+
                 <div class="mt-4 space-y-3">
                   <div
                     v-for="section in sectionSummary"
@@ -409,7 +674,7 @@ const deleteRoster = async (roster) => {
                     <div class="flex items-center justify-between gap-3">
                       <p class="font-semibold text-slate-800">{{ section.label }}</p>
                       <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                        {{ section.associates.length }} associates
+                        {{ section.associates.length }} associates · {{ section.assignedStations }} stations
                       </span>
                     </div>
                     <div class="mt-3 flex flex-wrap gap-2">
@@ -419,6 +684,13 @@ const deleteRoster = async (roster) => {
                         class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-600"
                       >
                         {{ associate.fullName }}
+                      </span>
+                      <span
+                        v-for="associate in section.associates.slice(0, 5).filter((entry) => entry.station)"
+                        :key="`${section.key}-${associate.id}-station`"
+                        class="rounded-full bg-violet-50 px-3 py-1 text-xs text-violet-600"
+                      >
+                        {{ associate.station.displayLabel }}
                       </span>
                       <span
                         v-if="section.associates.length > 5"
@@ -452,10 +724,14 @@ const deleteRoster = async (roster) => {
               </div>
 
               <div class="max-h-[480px] space-y-3 overflow-y-auto px-5 py-4">
+                <div class="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                  Shared stations are managed from `Add Stations`. Choosing an occupied one-person station will open a swap dialog.
+                </div>
+
                 <article
                   v-for="employee in filteredEmployeeOptions"
                   :key="employee.id"
-                  class="grid gap-4 rounded-2xl border border-slate-200 px-4 py-3 md:grid-cols-[1fr_220px]"
+                  class="grid gap-4 rounded-2xl border border-slate-200 px-4 py-3 xl:grid-cols-[1fr_180px_260px]"
                 >
                   <div class="flex items-center gap-3">
                     <img
@@ -493,6 +769,25 @@ const deleteRoster = async (roster) => {
                       </option>
                     </select>
                   </label>
+
+                  <label class="block">
+                    <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      Station ID
+                    </span>
+                    <select
+                      :value="assignmentLookup[employee.id]?.stationId || ''"
+                      class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none"
+                      @change="requestStationAssignment(employee.id, $event.target.value)"
+                    >
+                      <option value="">No station assigned</option>
+                      <option v-for="station in stations" :key="station.id" :value="station.id">
+                        {{ station.displayLabel }}
+                      </option>
+                    </select>
+                    <p class="mt-2 text-xs text-slate-400">
+                      {{ assignmentLookup[employee.id]?.stationId ? stationLookup[assignmentLookup[employee.id].stationId]?.displayLabel : 'Select a station from P2, P3, P4, or Far Away.' }}
+                    </p>
+                  </label>
                 </article>
 
                 <div
@@ -521,6 +816,186 @@ const deleteRoster = async (roster) => {
             class="inline-flex h-11 items-center rounded-xl bg-blue-600 px-4 text-sm font-medium text-white disabled:opacity-60"
           >
             {{ isSubmitting ? 'Saving...' : editingRosterId ? 'Update Roster' : 'Create Roster' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showStationsModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 px-4 py-4">
+      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">Station IDs</p>
+            <p class="mt-1 text-sm text-slate-500">
+              Add shared stations for floors `P2`, `P3`, and `P4`. Far away stations stay in a separate section and only work as fallback capacity.
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="closeStationsModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div class="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+            <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <p class="text-lg font-semibold text-slate-900">Add Station</p>
+              <div class="mt-5 grid gap-4">
+                <label class="block">
+                  <span class="mb-2 block text-sm text-slate-600">Floor</span>
+                  <select v-model="stationForm.floorCode" class="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none">
+                    <option v-for="floor in floors" :key="floor" :value="floor">{{ floor }}</option>
+                  </select>
+                </label>
+                <label class="block">
+                  <span class="mb-2 block text-sm text-slate-600">Station Type</span>
+                  <select v-model="stationForm.stationType" class="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none">
+                    <option v-for="stationType in stationTypes" :key="stationType" :value="stationType">
+                      {{ stationType === 'AR' ? 'AR Station' : 'Universal Station' }}
+                    </option>
+                  </select>
+                </label>
+                <label class="block">
+                  <span class="mb-2 block text-sm text-slate-600">Station ID</span>
+                  <input
+                    v-model="stationForm.stationCode"
+                    type="text"
+                    placeholder="Example: 203"
+                    class="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none"
+                  />
+                </label>
+                <label class="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <input v-model="stationForm.isFarAway" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
+                  Add this station to the Far Away station list
+                </label>
+                <button
+                  type="button"
+                  @click="saveStation"
+                  :disabled="isSavingStation"
+                  class="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  <span class="material-symbols-outlined text-base">add</span>
+                  {{ isSavingStation ? 'Saving...' : 'Save Station' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="grid gap-5">
+              <section
+                v-for="group in stationGroups"
+                :key="group.floorCode"
+                class="rounded-3xl border border-slate-200 bg-white p-5"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="text-lg font-semibold text-slate-900">{{ group.title }}</p>
+                    <p class="mt-1 text-sm text-slate-500">Normal station pool for {{ group.floorCode }}.</p>
+                  </div>
+                  <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                    {{ group.stations.length }} stations
+                  </span>
+                </div>
+                <div class="mt-4 flex flex-wrap gap-3">
+                  <div
+                    v-for="station in group.stations"
+                    :key="station.id"
+                    class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                  >
+                    <span class="font-semibold">{{ station.label }}</span>
+                    <span class="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">{{ station.stationType }}</span>
+                    <button
+                      type="button"
+                      @click="deleteStation(station)"
+                      :disabled="deletingStationId === station.id"
+                      class="inline-flex h-7 w-7 items-center justify-center rounded-full text-rose-500 disabled:opacity-60"
+                    >
+                      <span class="material-symbols-outlined text-base">delete</span>
+                    </button>
+                  </div>
+                  <p v-if="!group.stations.length" class="text-sm text-slate-400">No stations added for this floor yet.</p>
+                </div>
+              </section>
+
+              <section class="rounded-3xl border border-amber-200 bg-amber-50/60 p-5">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="text-lg font-semibold text-slate-900">Far Away Stations</p>
+                    <p class="mt-1 text-sm text-slate-500">Use these only when there is no empty normal station left.</p>
+                  </div>
+                  <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                    {{ farAwayStations.length }} stations
+                  </span>
+                </div>
+                <div class="mt-4 flex flex-wrap gap-3">
+                  <div
+                    v-for="station in farAwayStations"
+                    :key="station.id"
+                    class="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  >
+                    <span class="font-semibold">{{ station.label }}</span>
+                    <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">{{ station.stationType }}</span>
+                    <button
+                      type="button"
+                      @click="deleteStation(station)"
+                      :disabled="deletingStationId === station.id"
+                      class="inline-flex h-7 w-7 items-center justify-center rounded-full text-rose-500 disabled:opacity-60"
+                    >
+                      <span class="material-symbols-outlined text-base">delete</span>
+                    </button>
+                  </div>
+                  <p v-if="!farAwayStations.length" class="text-sm text-slate-400">No far away stations added yet.</p>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showSwapModal" class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 px-4">
+      <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">Station Already Assigned</p>
+            <p class="mt-1 text-sm text-slate-500">
+              {{ stationLookup[pendingSwap.targetStationId]?.displayLabel }} is already assigned to
+              {{ employeeLookup[pendingSwap.occupiedEmployeeId]?.fullName || 'another associate' }}.
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="closeSwapModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <div class="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+          One click will swap the station between
+          <span class="font-semibold text-slate-900">{{ employeeLookup[pendingSwap.employeeId]?.fullName || 'selected associate' }}</span>
+          and
+          <span class="font-semibold text-slate-900">{{ employeeLookup[pendingSwap.occupiedEmployeeId]?.fullName || 'current associate' }}</span>.
+        </div>
+
+        <div class="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            @click="closeSwapModal"
+            class="inline-flex h-11 items-center rounded-xl border border-slate-200 px-4 text-sm text-slate-600"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            @click="confirmStationSwap"
+            class="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white"
+          >
+            <span class="material-symbols-outlined text-base">swap_horiz</span>
+            Swap Stations
           </button>
         </div>
       </div>

@@ -207,6 +207,12 @@ const rosterAssociateCount = computed(() =>
   rosterSections.value.reduce((sum, section) => sum + (section.associates?.length || 0), 0),
 )
 const rosterSectionCount = computed(() => filledRosterSections.value.length)
+const rosterStationCount = computed(() =>
+  rosterSections.value.reduce(
+    (sum, section) => sum + section.associates.filter((associate) => associate.stationId).length,
+    0,
+  ),
+)
 const showConfirmVoteStep = computed(
   () => isCameraModalOpen.value && Boolean(pendingVoteCard.value && verifiedVoter.value),
 )
@@ -436,7 +442,7 @@ const loadPublicVotingPage = async () => {
   clearMessages()
 
   try {
-    const response = await fetchJson('/api/voting/live-ballot')
+    const response = await fetchJson('/api/voting/live-ballot-v2')
     homeSiteLogo.value = response.siteLogo || ''
     homeSiteName.value = response.siteName || ''
     homeSiteTagline.value = response.siteTagline || ''
@@ -979,11 +985,11 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="inline-flex w-full items-center gap-2 rounded-full bg-white/15 px-3 py-2 text-xs text-white/95 ring-1 ring-white/15 sm:w-auto sm:px-4 sm:text-sm">
                   <span class="material-symbols-outlined text-base">
-                    {{ isRosterState ? 'groups' : isFinishedRoundState ? 'campaign' : 'verified_user' }}
+                    {{ isRosterState ? 'pin_drop' : isFinishedRoundState ? 'campaign' : 'verified_user' }}
                   </span>
                   {{
                     isRosterState
-                      ? `${rosterAssociateCount} associates assigned`
+                      ? `${rosterStationCount} stations assigned`
                       : isFinishedRoundState
                         ? hasPublishedWinners
                           ? `${finishedRoundInfo?.winners?.length || 0} winners published`
@@ -1008,6 +1014,10 @@ onBeforeUnmount(() => {
                 <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Associates</p>
                 <p class="mt-2 text-3xl font-semibold text-slate-900">{{ rosterAssociateCount }}</p>
               </div>
+                <div class="public-brand-countdown-chip rounded-2xl border px-4 py-4 sm:col-span-2">
+                  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Stations Assigned</p>
+                  <p class="mt-2 text-3xl font-semibold text-slate-900">{{ rosterStationCount }}</p>
+                </div>
             </div>
             <div v-else class="mt-3 flex flex-wrap gap-2">
               <template v-if="countdownDisplayParts.length">
@@ -1213,6 +1223,20 @@ onBeforeUnmount(() => {
                   <p class="mt-1 truncate text-xs text-slate-400">
                     {{ associate.badgeId }} · {{ associate.departmentName }} / {{ associate.roleName }}
                   </p>
+                  <div v-if="associate.stationId" class="mt-2 flex flex-wrap gap-2">
+                    <span class="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                      {{ associate.stationLabel }}
+                    </span>
+                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                      {{ associate.stationType }}
+                    </span>
+                    <span
+                      v-if="associate.isFarAwayStation"
+                      class="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700"
+                    >
+                      Far Away
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

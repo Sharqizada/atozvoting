@@ -4517,3 +4517,643 @@ app.post('/api/employees-v2/import', async (req, res) => {
   }
 })
 
+
+const ROSTER_V2_SECTIONS = Object.freeze([
+  { key: 'STOW', label: 'Stow' },
+  { key: 'QUANTITY_STOW', label: 'Quantity Stow' },
+  { key: 'CUBISCAN', label: 'Cubiscan' },
+  { key: 'STOW_PG', label: 'Stow PG' },
+  { key: 'ISS', label: 'ISS' },
+  { key: 'WATER_SPIDER', label: 'Water Spider' },
+])
+const rosterV2SectionLabelMap = new Map(ROSTER_V2_SECTIONS.map((section) => [section.key, section.label]))
+const STATION_V2_FLOORS = Object.freeze(['P2', 'P3', 'P4'])
+const STATION_V2_TYPES = Object.freeze(['AR', 'UNIVERSAL'])
+const normalizeRosterV2SectionKey = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+  return rosterV2SectionLabelMap.has(normalized) ? normalized : ''
+}
+const normalizeStationV2Floor = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  return STATION_V2_FLOORS.includes(normalized) ? normalized : ''
+}
+const normalizeStationV2Type = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+  if (normalized === 'AR' || normalized === 'AR_STATION') {
+    return 'AR'
+  }
+
+  if (normalized === 'UNIVERSAL' || normalized === 'UNIVERSAL_STATION') {
+    return 'UNIVERSAL'
+  }
+
+  return ''
+}
+const formatStationV2Payload = (row) => ({
+  id: row.id,
+  floorCode: row.floor_code,
+  stationCode: row.station_code,
+  stationType: row.station_type,
+  isFarAway: Boolean(row.is_far_away),
+  label: `${row.floor_code} - ${row.station_code}`,
+  displayLabel: `${row.floor_code} - ${row.station_code} Â· ${row.station_type}${row.is_far_away ? ' Â· Far Away' : ''}`,
+})
+
+const ensureRosterStationV2Schema = async () => {
+  await execute(`
+    CREATE TABLE IF NOT EXISTS stations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      floor_code VARCHAR(10) NOT NULL,
+      station_code VARCHAR(60) NOT NULL,
+      station_type VARCHAR(20) NOT NULL DEFAULT 'UNIVERSAL',
+      is_far_away TINYINT(1) NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY unique_station_floor_code (floor_code, station_code)
+    )
+  `)
+  await ensureColumn('roster_assignments', 'station_id INT NULL AFTER section_key')
+}
+
+const getStationsV2 = async () => {
+  await ensureRosterStationV2Schema()
+
+  return query(
+    `
+      SELECT *
+      FROM stations
+      ORDER BY
+        is_far_away ASC,
+        CASE floor_code
+          WHEN 'P2' THEN 1
+          WHEN 'P3' THEN 2
+          WHEN 'P4' THEN 3
+          ELSE 99
+        END ASC,
+        station_code ASC
+    `,
+  )
+}
+
+const getRosterAssignmentsV2 = async (rosterIds) => {
+  await ensureRosterStationV2Schema()
+  const normalizedRosterIds = Array.isArray(rosterIds) ? rosterIds.filter(Boolean) : [rosterIds].filter(Boolean)
+
+  if (!normalizedRosterIds.length) {
+    return []
+  }
+
+  return query(
+    `
+      SELECT
+        roster_assignments.roster_id,
+        roster_assignments.section_key,
+        roster_assignments.station_id,
+        employees.id,
+        employees.badge_id,
+        employees.full_name,
+        employees.department_name,
+        employees.role_name,
+        employees.photo_data,
+        stations.floor_code,
+        stations.station_code,
+        stations.station_type,
+        stations.is_far_away
+      FROM roster_assignments
+      INNER JOIN employees ON employees.id = roster_assignments.employee_id
+      LEFT JOIN stations ON stations.id = roster_assignments.station_id
+      WHERE roster_assignments.roster_id IN (?)
+      ORDER BY employees.full_name ASC
+    `,
+    [normalizedRosterIds],
+  )
+}
+
+const buildRosterV2Sections = (assignmentRows = []) =>
+  ROSTER_V2_SECTIONS.map((section) => ({
+    key: section.key,
+    label: section.label,
+    associates: assignmentRows
+      .filter((row) => normalizeRosterV2SectionKey(row.section_key) === section.key)
+      .map((row) => ({
+        id: row.id,
+        badgeId: row.badge_id,
+        fullName: row.full_name,
+        departmentName: row.department_name,
+        roleName: row.role_name,
+        photoData: row.photo_data || '',
+        stationId: row.station_id || null,
+        stationFloorCode: row.floor_code || '',
+        stationCode: row.station_code || '',
+        stationType: row.station_type || '',
+        isFarAwayStation: Boolean(row.is_far_away),
+        stationLabel: row.station_id ? `${row.floor_code} - ${row.station_code}` : '',
+        stationDisplayLabel: row.station_id
+          ? `${row.floor_code} - ${row.station_code} Â· ${row.station_type}${row.is_far_away ? ' Â· Far Away' : ''}`
+          : '',
+      })),
+  }))
+
+const formatRosterV2Payload = (roster, assignmentRows = []) => {
+  const sections = buildRosterV2Sections(assignmentRows)
+  const totalAssociates = sections.reduce((sum, section) => sum + section.associates.length, 0)
+  const assignedStationCount = assignmentRows.filter((row) => Number(row.station_id)).length
+  const farAwayAssignedCount = assignmentRows.filter((row) => Number(row.station_id) && Boolean(row.is_far_away)).length
+
+  return {
+    id: roster.id,
+    name: roster.name,
+    description: roster.description || '',
+    homeVisibility: Boolean(roster.home_visibility),
+    creator: roster.creator_name || 'Admin',
+    createdAt: formatDateTime(roster.created_at),
+    updatedAt: formatDateTime(roster.updated_at || roster.created_at),
+    totalAssociates,
+    sectionCount: sections.filter((section) => section.associates.length).length,
+    assignedStationCount,
+    farAwayAssignedCount,
+    unassignedStationCount: Math.max(0, totalAssociates - assignedStationCount),
+    sections,
+  }
+}
+
+const parseRosterAssignmentsV2 = (assignments) => {
+  if (!Array.isArray(assignments)) {
+    return []
+  }
+
+  const normalized = new Map()
+
+  assignments.forEach((entry) => {
+    const employeeId = Number(entry?.employeeId)
+    const sectionKey = normalizeRosterV2SectionKey(entry?.sectionKey)
+    const stationId = Number(entry?.stationId) || null
+
+    if (!employeeId || !sectionKey) {
+      return
+    }
+
+    normalized.set(employeeId, {
+      employeeId,
+      sectionKey,
+      stationId,
+    })
+  })
+
+  return Array.from(normalized.values())
+}
+
+const validateRosterAssignmentsV2 = async (assignments) => {
+  if (!assignments.length) {
+    throw new Error('Roster name and at least one associate assignment are required.')
+  }
+
+  const employeeIds = assignments.map((assignment) => assignment.employeeId)
+  const employeeRows = await query(
+    `
+      SELECT id
+      FROM employees
+      WHERE employment_status = 'ACTIVE' AND id IN (?)
+    `,
+    [employeeIds],
+  )
+
+  if (employeeRows.length !== employeeIds.length) {
+    throw new Error('Only active associates can be assigned to a roster.')
+  }
+
+  const stationIds = assignments.map((assignment) => assignment.stationId).filter(Boolean)
+  const uniqueStationIds = Array.from(new Set(stationIds))
+
+  if (uniqueStationIds.length !== stationIds.length) {
+    throw new Error('Each station can only be assigned to one associate at a time.')
+  }
+
+  if (!uniqueStationIds.length) {
+    return
+  }
+
+  const stationRows = await query(
+    `
+      SELECT id
+      FROM stations
+      WHERE id IN (?)
+    `,
+    [uniqueStationIds],
+  )
+
+  if (stationRows.length !== uniqueStationIds.length) {
+    throw new Error('One or more selected stations no longer exist.')
+  }
+}
+
+const syncRosterAssignmentsV2 = async (rosterId, assignments, runner = pool) => {
+  await ensureRosterStationV2Schema()
+  await executeWith(runner, 'DELETE FROM roster_assignments WHERE roster_id = ?', [rosterId])
+
+  if (!assignments.length) {
+    return
+  }
+
+  await chunkInsert(
+    `
+      INSERT INTO roster_assignments (roster_id, employee_id, section_key, station_id)
+      VALUES ?
+    `,
+    assignments.map((assignment) => [
+      rosterId,
+      assignment.employeeId,
+      assignment.sectionKey,
+      assignment.stationId,
+    ]),
+    500,
+    runner,
+  )
+}
+
+const setRosterHomeVisibilityV2 = async (rosterId, isVisible) => {
+  await ensureRosterStationV2Schema()
+  const roster = await getRosterById(rosterId)
+
+  if (!roster) {
+    throw new Error('Roster not found.')
+  }
+
+  if (isVisible) {
+    await getHomePageBlockerForRoster(rosterId)
+  }
+
+  await execute(
+    `
+      UPDATE rosters
+      SET home_visibility = ?, updated_at = NOW()
+      WHERE id = ?
+    `,
+    [isVisible ? 1 : 0, rosterId],
+  )
+
+  const updatedRoster = await getRosterById(rosterId)
+  const assignments = await getRosterAssignmentsV2(rosterId)
+  return formatRosterV2Payload(updatedRoster, assignments)
+}
+
+app.get('/api/stations-v2', async (_req, res) => {
+  try {
+    const stationRows = await getStationsV2()
+    return res.json({
+      floors: STATION_V2_FLOORS,
+      stationTypes: STATION_V2_TYPES,
+      stations: stationRows.map(formatStationV2Payload),
+    })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to load stations.', error: error.message })
+  }
+})
+
+app.post('/api/stations-v2', async (req, res) => {
+  const floorCode = normalizeStationV2Floor(req.body?.floorCode)
+  const stationCode = `${req.body?.stationCode || ''}`.trim()
+  const stationType = normalizeStationV2Type(req.body?.stationType)
+  const isFarAway = req.body?.isFarAway === true
+
+  if (!floorCode || !stationCode || !stationType) {
+    return res.status(400).json({ message: 'Floor, station ID, and station type are required.' })
+  }
+
+  try {
+    await ensureRosterStationV2Schema()
+    const result = await execute(
+      `
+        INSERT INTO stations (floor_code, station_code, station_type, is_far_away, created_at)
+        VALUES (?, ?, ?, ?, NOW())
+      `,
+      [floorCode, stationCode, stationType, isFarAway ? 1 : 0],
+    )
+    const rows = await query('SELECT * FROM stations WHERE id = ? LIMIT 1', [result.insertId])
+    return res.json({
+      success: true,
+      station: formatStationV2Payload(rows[0]),
+      message: 'Station added successfully.',
+    })
+  } catch (error) {
+    const message =
+      error.code === 'ER_DUP_ENTRY'
+        ? 'That station ID already exists on the selected floor.'
+        : 'Unable to save station.'
+    return res.status(400).json({ message, error: error.message })
+  }
+})
+
+app.delete('/api/stations-v2/:id', async (req, res) => {
+  const stationId = Number(req.params.id)
+
+  if (!stationId) {
+    return res.status(400).json({ message: 'Valid station id is required.' })
+  }
+
+  try {
+    await ensureRosterStationV2Schema()
+    await execute('UPDATE roster_assignments SET station_id = NULL WHERE station_id = ?', [stationId])
+    await execute('DELETE FROM stations WHERE id = ?', [stationId])
+    return res.json({ success: true, message: 'Station deleted successfully.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to delete station.', error: error.message })
+  }
+})
+
+app.get('/api/rosters-v2', async (_req, res) => {
+  try {
+    await ensureRosterStationV2Schema()
+    const rosterRows = await query(
+      `
+        SELECT rosters.*, admins.full_name AS creator_name, COUNT(roster_assignments.id) AS assigned_count
+        FROM rosters
+        LEFT JOIN admins ON admins.id = rosters.created_by_admin_id
+        LEFT JOIN roster_assignments ON roster_assignments.roster_id = rosters.id
+        GROUP BY rosters.id, admins.full_name
+        ORDER BY rosters.updated_at DESC, rosters.id DESC
+      `,
+    )
+    const assignmentRows = await getRosterAssignmentsV2(rosterRows.map((row) => row.id))
+    const stationRows = await getStationsV2()
+    const employeeOptions = await query(
+      `
+        SELECT id, badge_id, full_name, department_name, role_name, employment_status, photo_data
+        FROM employees
+        WHERE employment_status = 'ACTIVE'
+        ORDER BY full_name ASC
+      `,
+    )
+    const assignmentMap = assignmentRows.reduce((accumulator, row) => {
+      if (!accumulator.has(row.roster_id)) {
+        accumulator.set(row.roster_id, [])
+      }
+
+      accumulator.get(row.roster_id).push(row)
+      return accumulator
+    }, new Map())
+    const rosters = rosterRows.map((row) => {
+      const payload = formatRosterV2Payload(row, assignmentMap.get(row.id) || [])
+
+      return {
+        ...payload,
+        homeStatusLabel: payload.homeVisibility ? 'Live on Home' : 'Hidden from Home',
+        homeStatusClass: payload.homeVisibility
+          ? 'bg-emerald-100 text-emerald-600'
+          : 'bg-slate-100 text-slate-600',
+      }
+    })
+
+    return res.json({
+      stats: [
+        { title: 'Total Rosters', value: formatNumber(rosters.length), note: 'All roster pages', icon: 'view_list', panel: 'bg-blue-50', iconBg: 'bg-blue-600' },
+        { title: 'Live on Home', value: formatNumber(rosters.filter((roster) => roster.homeVisibility).length), note: 'Visible roster pages', icon: 'home', panel: 'bg-emerald-50', iconBg: 'bg-emerald-500' },
+        { title: 'Assigned Associates', value: formatNumber(rosters.reduce((sum, roster) => sum + roster.totalAssociates, 0)), note: 'Across all rosters', icon: 'groups', panel: 'bg-amber-50', iconBg: 'bg-amber-500' },
+        { title: 'Total Stations', value: formatNumber(stationRows.length), note: 'Shared P2 / P3 / P4 pool', icon: 'pin_drop', panel: 'bg-violet-50', iconBg: 'bg-violet-500' },
+      ],
+      rosters,
+      rosterSections: ROSTER_V2_SECTIONS,
+      floors: STATION_V2_FLOORS,
+      stationTypes: STATION_V2_TYPES,
+      stations: stationRows.map(formatStationV2Payload),
+      employeeOptions: employeeOptions.map((employee) => ({
+        id: employee.id,
+        badgeId: employee.badge_id,
+        fullName: employee.full_name,
+        departmentName: employee.department_name,
+        roleName: employee.role_name,
+        photoData: employee.photo_data || '',
+      })),
+      pagination: {
+        showing: `Showing 1 to ${rosters.length} of ${rosters.length} rosters`,
+      },
+    })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to load rosters.', error: error.message })
+  }
+})
+
+app.post('/api/rosters-v2', async (req, res) => {
+  const name = req.body?.name?.trim()
+  const description = req.body?.description?.trim() || ''
+  const assignments = parseRosterAssignmentsV2(req.body?.assignments)
+
+  if (!name || !assignments.length) {
+    return res.status(400).json({ message: 'Roster name and at least one associate assignment are required.' })
+  }
+
+  try {
+    await ensureRosterStationV2Schema()
+    await validateRosterAssignmentsV2(assignments)
+    const connection = await pool.getConnection()
+
+    try {
+      await connection.beginTransaction()
+      const result = await executeWith(
+        connection,
+        `
+          INSERT INTO rosters (name, description, home_visibility, created_by_admin_id, created_at)
+          VALUES (?, ?, 0, ?, NOW())
+        `,
+        [name, description, 1],
+      )
+      await syncRosterAssignmentsV2(result.insertId, assignments, connection)
+      await connection.commit()
+      return res.json({ success: true, message: 'Roster created successfully.' })
+    } catch (error) {
+      await connection.rollback().catch(() => {})
+      return res.status(500).json({ message: error.message || 'Unable to create roster.', error: error.message })
+    } finally {
+      connection.release()
+    }
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Unable to validate roster associates.', error: error.message })
+  }
+})
+
+app.put('/api/rosters-v2/:id', async (req, res) => {
+  const rosterId = Number(req.params.id)
+  const name = req.body?.name?.trim()
+  const description = req.body?.description?.trim() || ''
+  const assignments = parseRosterAssignmentsV2(req.body?.assignments)
+
+  if (!rosterId || !name || !assignments.length) {
+    return res.status(400).json({ message: 'Valid roster details and assignments are required.' })
+  }
+
+  try {
+    await ensureRosterStationV2Schema()
+    const existingRoster = await getRosterById(rosterId)
+
+    if (!existingRoster) {
+      return res.status(404).json({ message: 'Roster not found.' })
+    }
+
+    await validateRosterAssignmentsV2(assignments)
+    const connection = await pool.getConnection()
+
+    try {
+      await connection.beginTransaction()
+      await executeWith(
+        connection,
+        `
+          UPDATE rosters
+          SET name = ?, description = ?, updated_at = NOW()
+          WHERE id = ?
+        `,
+        [name, description, rosterId],
+      )
+      await syncRosterAssignmentsV2(rosterId, assignments, connection)
+      await connection.commit()
+      return res.json({ success: true, message: 'Roster updated successfully.' })
+    } catch (error) {
+      await connection.rollback().catch(() => {})
+      return res.status(500).json({ message: error.message || 'Unable to update roster.', error: error.message })
+    } finally {
+      connection.release()
+    }
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Unable to save roster.', error: error.message })
+  }
+})
+
+app.post('/api/rosters-v2/:id/home-visibility', async (req, res) => {
+  const rosterId = Number(req.params.id)
+  const visible = req.body?.visible === true
+
+  if (!rosterId) {
+    return res.status(400).json({ message: 'Valid roster id is required.' })
+  }
+
+  try {
+    const roster = await setRosterHomeVisibilityV2(rosterId, visible)
+    return res.json({
+      roster,
+      message: visible
+        ? 'Roster is now live on the Home page.'
+        : 'Roster is now hidden from the Home page.',
+    })
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Unable to update roster Home page visibility.' })
+  }
+})
+
+app.delete('/api/rosters-v2/:id', async (req, res) => {
+  const rosterId = Number(req.params.id)
+
+  if (!rosterId) {
+    return res.status(400).json({ message: 'Valid roster id is required.' })
+  }
+
+  try {
+    await ensureRosterStationV2Schema()
+    await execute('DELETE FROM roster_assignments WHERE roster_id = ?', [rosterId])
+    await execute('DELETE FROM rosters WHERE id = ?', [rosterId])
+    return res.json({ success: true, message: 'Roster deleted successfully.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to delete roster.', error: error.message })
+  }
+})
+
+app.get('/api/voting/live-ballot-v2', async (_req, res) => {
+  try {
+    await ensureRosterStationV2Schema()
+    const settings = await getSettingMap()
+    const activeRound = await getActiveRound()
+
+    if (!activeRound) {
+      const visibleRoster = await getVisibleRoster()
+
+      if (visibleRoster) {
+        const rosterAssignments = await getRosterAssignmentsV2(visibleRoster.id)
+
+        return res.json({
+          hasActiveRound: false,
+          ...getPublicBrandingSettings(settings),
+          round: null,
+          categories: [],
+          finishedRound: null,
+          roster: formatRosterV2Payload(visibleRoster, rosterAssignments),
+        })
+      }
+
+      const finishedRound = await getLatestCompletedRound()
+      const resultVisibility = normalizeRoundResultVisibility(
+        finishedRound?.result_visibility,
+        finishedRound?.winners_published ? 'VISIBLE' : 'WAITING',
+      )
+      const winnerPreview =
+        finishedRound && resultVisibility === 'VISIBLE' ? await getRoundWinnerPreview(finishedRound.id) : null
+
+      return res.json({
+        hasActiveRound: false,
+        ...getPublicBrandingSettings(settings),
+        round: null,
+        categories: [],
+        roster: null,
+        finishedRound:
+          finishedRound && resultVisibility !== 'HIDDEN'
+            ? {
+                id: finishedRound.id,
+                name: finishedRound.name,
+                description: finishedRound.description || '',
+                startDate: finishedRound.start_date,
+                endDate: finishedRound.end_date,
+                roundId: finishedRound.access_code,
+                status: finishedRound.status,
+                winnersPublished: resultVisibility === 'VISIBLE',
+                resultVisibility,
+                winners: winnerPreview?.winners || [],
+              }
+            : null,
+      })
+    }
+
+    const categories = await getRoundCategories(activeRound.id)
+    const candidates = await getPublicRoundCandidates(activeRound.id)
+    const candidateCards = candidates.map((candidate) => ({
+      id: candidate.id,
+      badgeId: candidate.badge_id,
+      fullName: candidate.full_name,
+      departmentName: candidate.department_name,
+      roleName: candidate.role_name,
+      photoData: candidate.photo_data,
+    }))
+    const ballotCategories = categories.length
+      ? categories.map((category) => ({
+          id: category.id,
+          name: category.name,
+          candidates: candidateCards,
+        }))
+      : candidateCards.length
+        ? [
+            {
+              id: 0,
+              name: 'Nominees',
+              candidates: candidateCards,
+            },
+          ]
+        : []
+
+    return res.json({
+      hasActiveRound: true,
+      ...getPublicBrandingSettings(settings),
+      round: {
+        id: activeRound.id,
+        name: activeRound.name,
+        description: activeRound.description || '',
+        startDate: activeRound.start_date,
+        endDate: activeRound.end_date,
+        roundId: activeRound.access_code,
+        participantCount: activeRound.participant_count,
+        status: activeRound.status,
+      },
+      categories: ballotCategories,
+      finishedRound: null,
+      roster: null,
+    })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to load the live ballot.', error: error.message })
+  }
+})
+
