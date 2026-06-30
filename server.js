@@ -93,6 +93,19 @@ const normalizeRoundResultVisibility = (value, fallback = 'WAITING') => {
   const normalized = `${value || ''}`.trim().toUpperCase()
   return ['WAITING', 'VISIBLE', 'HIDDEN'].includes(normalized) ? normalized : fallback
 }
+const ROSTER_SECTIONS = Object.freeze([
+  { key: 'STOW', label: 'Stow' },
+  { key: 'QUANTITY_STOW', label: 'Quantity Stow' },
+  { key: 'CUBISCAN', label: 'Cubiscan' },
+  { key: 'STOW_PG', label: 'Stow PG' },
+  { key: 'ISS_WATER_SPIDER', label: 'ISS Water Spider' },
+])
+const rosterSectionLabelMap = new Map(ROSTER_SECTIONS.map((section) => [section.key, section.label]))
+const normalizeRosterSectionKey = (value) => {
+  const normalized = `${value || ''}`.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+  return rosterSectionLabelMap.has(normalized) ? normalized : ''
+}
+const getRosterSectionLabel = (value) => rosterSectionLabelMap.get(normalizeRosterSectionKey(value)) || ''
 
 const getDefaultSettingEntries = () => [
   ['site_name', 'general', DEFAULT_SITE_INFO.siteName],
@@ -631,6 +644,28 @@ const createSchema = async () => {
       vote_status VARCHAR(20) NOT NULL DEFAULT 'Valid',
       is_valid TINYINT(1) NOT NULL DEFAULT 1,
       created_at DATETIME NOT NULL
+    )
+  `)
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS rosters (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(160) NOT NULL UNIQUE,
+      description TEXT NULL,
+      home_visibility TINYINT(1) NOT NULL DEFAULT 0,
+      created_by_admin_id INT NULL,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `)
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS roster_assignments (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      roster_id INT NOT NULL,
+      employee_id INT NOT NULL,
+      section_key VARCHAR(40) NOT NULL,
+      UNIQUE KEY unique_roster_assignment (roster_id, employee_id)
     )
   `)
 
@@ -1517,6 +1552,10 @@ const setRoundResultVisibility = async (roundId, requestedVisibility) => {
     throw new Error('No winner data is available to show for this voting round.')
   }
 
+  if (visibility === 'VISIBLE') {
+    await getHomePageBlockerForRoundResult()
+  }
+
   await execute(
     `
       UPDATE voting_rounds
@@ -1534,6 +1573,195 @@ const setRoundResultVisibility = async (roundId, requestedVisibility) => {
 }
 
 const publishRoundWinners = async (roundId) => setRoundResultVisibility(roundId, 'VISIBLE')
+
+const getVisibleRoster = async (excludeRosterId = 0) => {
+  const rows = await query(
+    `
+      SELECT rosters.*, admins.full_name AS creator_name
+      FROM rosters
+      LEFT JOIN admins ON admins.id = rosters.created_by_admin_id
+      WHERE rosters.home_visibility = 1
+        AND (? = 0 OR rosters.id <> ?)
+      ORDER BY rosters.updated_at DESC, rosters.id DESC
+      LIMIT 1
+    `,
+    [excludeRosterId, excludeRosterId],
+  )
+
+  return rows[0]
+}
+
+const getRosterById = async (rosterId) => {
+  const rows = await query(
+    `
+      SELECT rosters.*, admins.full_name AS creator_name
+      FROM rosters
+      LEFT JOIN admins ON admins.id = rosters.created_by_admin_id
+      WHERE rosters.id = ?
+      LIMIT 1
+    `,
+    [rosterId],
+  )
+
+  return rows[0]
+}
+
+const getRosterAssignments = async (rosterIds) => {
+  const normalizedRosterIds = Array.isArray(rosterIds) ? rosterIds.filter(Boolean) : [rosterIds].filter(Boolean)
+
+  if (!normalizedRosterIds.length) {
+    return []
+  }
+
+  return query(
+    `
+      SELECT
+        roster_assignments.roster_id,
+        roster_assignments.section_key,
+        employees.id,
+        employees.badge_id,
+        employees.full_name,
+        employees.department_name,
+        employees.role_name,
+        employees.photo_data
+      FROM roster_assignments
+      INNER JOIN employees ON employees.id = roster_assignments.employee_id
+      WHERE roster_assignments.roster_id IN (?)
+      ORDER BY employees.full_name ASC
+    `,
+    [normalizedRosterIds],
+  )
+}
+
+const buildRosterSections = (assignmentRows = []) =>
+  ROSTER_SECTIONS.map((section) => ({
+    key: section.key,
+    label: section.label,
+    associates: assignmentRows
+      .filter((row) => normalizeRosterSectionKey(row.section_key) === section.key)
+      .map((row) => ({
+        id: row.id,
+        badgeId: row.badge_id,
+        fullName: row.full_name,
+        departmentName: row.department_name,
+        roleName: row.role_name,
+        photoData: row.photo_data || '',
+      })),
+  }))
+
+const formatRosterPayload = (roster, assignmentRows = []) => {
+  const sections = buildRosterSections(assignmentRows)
+  const totalAssociates = sections.reduce((sum, section) => sum + section.associates.length, 0)
+
+  return {
+    id: roster.id,
+    name: roster.name,
+    description: roster.description || '',
+    homeVisibility: Boolean(roster.home_visibility),
+    creator: roster.creator_name || 'Admin',
+    createdAt: formatDateTime(roster.created_at),
+    updatedAt: formatDateTime(roster.updated_at || roster.created_at),
+    totalAssociates,
+    sectionCount: sections.filter((section) => section.associates.length).length,
+    sections,
+  }
+}
+
+const parseRosterAssignments = (assignments) => {
+  if (!Array.isArray(assignments)) {
+    return []
+  }
+
+  const normalized = new Map()
+
+  assignments.forEach((entry) => {
+    const employeeId = Number(entry?.employeeId)
+    const sectionKey = normalizeRosterSectionKey(entry?.sectionKey)
+
+    if (!employeeId || !sectionKey) {
+      return
+    }
+
+    normalized.set(employeeId, { employeeId, sectionKey })
+  })
+
+  return Array.from(normalized.values())
+}
+
+const syncRosterAssignments = async (rosterId, assignments, runner = pool) => {
+  await executeWith(runner, 'DELETE FROM roster_assignments WHERE roster_id = ?', [rosterId])
+
+  if (!assignments.length) {
+    return
+  }
+
+  await chunkInsert(
+    `
+      INSERT INTO roster_assignments (roster_id, employee_id, section_key)
+      VALUES ?
+    `,
+    assignments.map((assignment) => [rosterId, assignment.employeeId, assignment.sectionKey]),
+    500,
+    runner,
+  )
+}
+
+const getHomePageBlockerForRoster = async (rosterId = 0) => {
+  const activeRound = await getActiveRound()
+
+  if (activeRound) {
+    throw new Error(`"${activeRound.name}" is still live on the Home page. Hide or end it before showing a roster.`)
+  }
+
+  const latestCompletedRound = await getLatestCompletedRound()
+  const resultVisibility = normalizeRoundResultVisibility(
+    latestCompletedRound?.result_visibility,
+    latestCompletedRound?.winners_published ? 'VISIBLE' : 'WAITING',
+  )
+
+  if (latestCompletedRound && resultVisibility !== 'HIDDEN') {
+    throw new Error(`"${latestCompletedRound.name}" is still visible on the Home page. Hide that winner page first.`)
+  }
+
+  const visibleRoster = await getVisibleRoster(rosterId)
+
+  if (visibleRoster) {
+    throw new Error(`"${visibleRoster.name}" is already visible on the Home page. Hide it first before showing another roster.`)
+  }
+}
+
+const getHomePageBlockerForRoundResult = async () => {
+  const visibleRoster = await getVisibleRoster()
+
+  if (visibleRoster) {
+    throw new Error(`"${visibleRoster.name}" is already visible on the Home page. Hide that roster first.`)
+  }
+}
+
+const setRosterHomeVisibility = async (rosterId, isVisible) => {
+  const roster = await getRosterById(rosterId)
+
+  if (!roster) {
+    throw new Error('Roster not found.')
+  }
+
+  if (isVisible) {
+    await getHomePageBlockerForRoster(rosterId)
+  }
+
+  await execute(
+    `
+      UPDATE rosters
+      SET home_visibility = ?, updated_at = NOW()
+      WHERE id = ?
+    `,
+    [isVisible ? 1 : 0, rosterId],
+  )
+
+  const updatedRoster = await getRosterById(rosterId)
+  const assignments = await getRosterAssignments(rosterId)
+  return formatRosterPayload(updatedRoster, assignments)
+}
 
 const getRoundCategories = async (roundId) =>
   query(
@@ -2355,6 +2583,7 @@ app.delete('/api/employees/:id', async (req, res) => {
     )
     await execute('DELETE FROM votes WHERE voter_employee_id = ? OR candidate_employee_id = ?', [employeeId, employeeId])
     await execute('DELETE FROM voting_round_participants WHERE employee_id = ?', [employeeId])
+    await execute('DELETE FROM roster_assignments WHERE employee_id = ?', [employeeId])
     await execute('DELETE FROM employees WHERE id = ?', [employeeId])
 
     for (const round of affectedRounds) {
@@ -2444,6 +2673,21 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
     const activeRound = await getActiveRound()
 
     if (!activeRound) {
+      const visibleRoster = await getVisibleRoster()
+
+      if (visibleRoster) {
+        const rosterAssignments = await getRosterAssignments(visibleRoster.id)
+
+        return res.json({
+          hasActiveRound: false,
+          ...getPublicBrandingSettings(settings),
+          round: null,
+          categories: [],
+          finishedRound: null,
+          roster: formatRosterPayload(visibleRoster, rosterAssignments),
+        })
+      }
+
       const finishedRound = await getLatestCompletedRound()
       const resultVisibility = normalizeRoundResultVisibility(
         finishedRound?.result_visibility,
@@ -2457,6 +2701,7 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
         ...getPublicBrandingSettings(settings),
         round: null,
         categories: [],
+        roster: null,
         finishedRound: finishedRound && resultVisibility !== 'HIDDEN'
           ? {
               id: finishedRound.id,
@@ -2514,6 +2759,7 @@ app.get('/api/voting/live-ballot', async (_req, res) => {
       },
       categories: ballotCategories,
       finishedRound: null,
+      roster: null,
     })
   } catch (error) {
     return res.status(500).json({ message: 'Unable to load the live ballot.', error: error.message })
@@ -3334,6 +3580,216 @@ app.delete('/api/voting-rounds/:id', async (req, res) => {
     return res.json({ success: true, message: 'Voting round deleted successfully.' })
   } catch (error) {
     return res.status(500).json({ message: 'Unable to delete voting round.', error: error.message })
+  }
+})
+
+app.get('/api/rosters', async (_req, res) => {
+  try {
+    const rosterRows = await query(
+      `
+        SELECT rosters.*, admins.full_name AS creator_name, COUNT(roster_assignments.id) AS assigned_count
+        FROM rosters
+        LEFT JOIN admins ON admins.id = rosters.created_by_admin_id
+        LEFT JOIN roster_assignments ON roster_assignments.roster_id = rosters.id
+        GROUP BY rosters.id, admins.full_name
+        ORDER BY rosters.updated_at DESC, rosters.id DESC
+      `,
+    )
+    const assignmentRows = await getRosterAssignments(rosterRows.map((row) => row.id))
+    const employeeOptions = await query(
+      `
+        SELECT id, badge_id, full_name, department_name, role_name, employment_status, photo_data
+        FROM employees
+        WHERE employment_status = 'ACTIVE'
+        ORDER BY full_name ASC
+      `,
+    )
+    const assignmentMap = assignmentRows.reduce((accumulator, row) => {
+      if (!accumulator.has(row.roster_id)) {
+        accumulator.set(row.roster_id, [])
+      }
+
+      accumulator.get(row.roster_id).push(row)
+      return accumulator
+    }, new Map())
+    const rosters = rosterRows.map((row) => {
+      const payload = formatRosterPayload(row, assignmentMap.get(row.id) || [])
+
+      return {
+        ...payload,
+        homeStatusLabel: payload.homeVisibility ? 'Live on Home' : 'Hidden from Home',
+        homeStatusClass: payload.homeVisibility ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-600',
+      }
+    })
+
+    return res.json({
+      stats: [
+        { title: 'Total Rosters', value: formatNumber(rosters.length), note: 'All roster pages', icon: 'view_list', panel: 'bg-blue-50', iconBg: 'bg-blue-600' },
+        { title: 'Live on Home', value: formatNumber(rosters.filter((roster) => roster.homeVisibility).length), note: 'Visible roster pages', icon: 'home', panel: 'bg-emerald-50', iconBg: 'bg-emerald-500' },
+        { title: 'Assigned Associates', value: formatNumber(rosters.reduce((sum, roster) => sum + roster.totalAssociates, 0)), note: 'Across all rosters', icon: 'groups', panel: 'bg-amber-50', iconBg: 'bg-amber-500' },
+        { title: 'Sections Used', value: formatNumber(rosters.reduce((sum, roster) => sum + roster.sectionCount, 0)), note: 'Filled roster sections', icon: 'dashboard_customize', panel: 'bg-violet-50', iconBg: 'bg-violet-500' },
+      ],
+      rosters,
+      rosterSections: ROSTER_SECTIONS,
+      employeeOptions: employeeOptions.map((employee) => ({
+        id: employee.id,
+        badgeId: employee.badge_id,
+        fullName: employee.full_name,
+        departmentName: employee.department_name,
+        roleName: employee.role_name,
+        photoData: employee.photo_data || '',
+      })),
+      pagination: {
+        showing: `Showing 1 to ${rosters.length} of ${rosters.length} rosters`,
+      },
+    })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to load rosters.', error: error.message })
+  }
+})
+
+app.post('/api/rosters', async (req, res) => {
+  const name = req.body?.name?.trim()
+  const description = req.body?.description?.trim() || ''
+  const assignments = parseRosterAssignments(req.body?.assignments)
+
+  if (!name || !assignments.length) {
+    return res.status(400).json({ message: 'Roster name and at least one associate assignment are required.' })
+  }
+
+  try {
+    const employeeIds = assignments.map((assignment) => assignment.employeeId)
+    const employeeRows = await query(
+      `
+        SELECT id
+        FROM employees
+        WHERE employment_status = 'ACTIVE' AND id IN (?)
+      `,
+      [employeeIds],
+    )
+
+    if (employeeRows.length !== employeeIds.length) {
+      return res.status(400).json({ message: 'Only active associates can be assigned to a roster.' })
+    }
+
+    const connection = await pool.getConnection()
+
+    try {
+      await connection.beginTransaction()
+      const result = await executeWith(
+        connection,
+        `
+          INSERT INTO rosters (name, description, home_visibility, created_by_admin_id, created_at)
+          VALUES (?, ?, 0, ?, NOW())
+        `,
+        [name, description, 1],
+      )
+      await syncRosterAssignments(result.insertId, assignments, connection)
+      await connection.commit()
+      return res.json({ success: true, message: 'Roster created successfully.' })
+    } catch (error) {
+      await connection.rollback().catch(() => {})
+      return res.status(500).json({ message: error.message || 'Unable to create roster.', error: error.message })
+    } finally {
+      connection.release()
+    }
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to validate roster associates.', error: error.message })
+  }
+})
+
+app.put('/api/rosters/:id', async (req, res) => {
+  const rosterId = Number(req.params.id)
+  const name = req.body?.name?.trim()
+  const description = req.body?.description?.trim() || ''
+  const assignments = parseRosterAssignments(req.body?.assignments)
+
+  if (!rosterId || !name || !assignments.length) {
+    return res.status(400).json({ message: 'Valid roster details and assignments are required.' })
+  }
+
+  try {
+    const existingRoster = await getRosterById(rosterId)
+
+    if (!existingRoster) {
+      return res.status(404).json({ message: 'Roster not found.' })
+    }
+
+    const employeeIds = assignments.map((assignment) => assignment.employeeId)
+    const employeeRows = await query(
+      `
+        SELECT id
+        FROM employees
+        WHERE employment_status = 'ACTIVE' AND id IN (?)
+      `,
+      [employeeIds],
+    )
+
+    if (employeeRows.length !== employeeIds.length) {
+      return res.status(400).json({ message: 'Only active associates can be assigned to a roster.' })
+    }
+
+    const connection = await pool.getConnection()
+
+    try {
+      await connection.beginTransaction()
+      await executeWith(
+        connection,
+        `
+          UPDATE rosters
+          SET name = ?, description = ?, updated_at = NOW()
+          WHERE id = ?
+        `,
+        [name, description, rosterId],
+      )
+      await syncRosterAssignments(rosterId, assignments, connection)
+      await connection.commit()
+      return res.json({ success: true, message: 'Roster updated successfully.' })
+    } catch (error) {
+      await connection.rollback().catch(() => {})
+      return res.status(500).json({ message: error.message || 'Unable to update roster.', error: error.message })
+    } finally {
+      connection.release()
+    }
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to save roster.', error: error.message })
+  }
+})
+
+app.post('/api/rosters/:id/home-visibility', async (req, res) => {
+  const rosterId = Number(req.params.id)
+  const visible = req.body?.visible === true
+
+  if (!rosterId) {
+    return res.status(400).json({ message: 'Valid roster id is required.' })
+  }
+
+  try {
+    const roster = await setRosterHomeVisibility(rosterId, visible)
+    return res.json({
+      roster,
+      message: visible
+        ? 'Roster is now live on the Home page.'
+        : 'Roster is now hidden from the Home page.',
+    })
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Unable to update roster Home page visibility.' })
+  }
+})
+
+app.delete('/api/rosters/:id', async (req, res) => {
+  const rosterId = Number(req.params.id)
+
+  if (!rosterId) {
+    return res.status(400).json({ message: 'Valid roster id is required.' })
+  }
+
+  try {
+    await execute('DELETE FROM roster_assignments WHERE roster_id = ?', [rosterId])
+    await execute('DELETE FROM rosters WHERE id = ?', [rosterId])
+    return res.json({ success: true, message: 'Roster deleted successfully.' })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to delete roster.', error: error.message })
   }
 })
 

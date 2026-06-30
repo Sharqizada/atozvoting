@@ -30,6 +30,7 @@ export const adminNavigationGroups = [
       { label: 'Voting Rounds', icon: 'calendar_month', route: '/admin/voting-rounds' },
       { label: 'Categories', icon: 'sell', route: '/admin/categories' },
       { label: 'Associates', icon: 'group', route: '/admin/employees' },
+      { label: 'Rosters', icon: 'view_list', route: '/admin/rosters' },
       { label: 'Votes', icon: 'bar_chart', route: '/admin/votes' },
     ],
   },

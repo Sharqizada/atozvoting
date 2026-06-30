@@ -11,6 +11,7 @@ import PastWinnersView from '../views/PastWinnersView.vue'
 import AdminsView from '../views/AdminsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import AuditLogsView from '../views/AuditLogsView.vue'
+import RostersView from '../views/RostersView.vue'
 import VotingBoothView from '../views/VotingBoothView.vue'
 
 const router = createRouter({
@@ -66,6 +67,14 @@ const router = createRouter({
       path: '/admin/employees',
       name: 'admin-employees',
       component: EmployeesView,
+      meta: {
+        requiresAuth: true,
+      },
+    },
+    {
+      path: '/admin/rosters',
+      name: 'admin-rosters',
+      component: RostersView,
       meta: {
         requiresAuth: true,
       },

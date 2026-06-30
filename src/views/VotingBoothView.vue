@@ -17,6 +17,7 @@ const homeSiteTagline = ref('')
 const brandingColors = ref(resolveBrandingColors())
 const roundSummary = ref(null)
 const finishedRoundSummary = ref(null)
+const rosterSummary = ref(null)
 const publicCategories = ref([])
 const pendingVoteCard = ref(null)
 const verifiedVoter = ref(null)
@@ -53,29 +54,6 @@ let roundRefreshInterval = null
 let toastTimeout = null
 let hasReloadedAfterCountdown = false
 let scannerTuneInterval = null
-const isLocalScannerDebugRuntime =
-  import.meta.env.DEV &&
-  typeof window !== 'undefined' &&
-  ['localhost', '127.0.0.1'].includes(window.location.hostname)
-// #region debug-point A:reporter
-const reportScannerDebug = (hypothesisId, msg, data = {}, runId = 'post-fix') =>
-  !isLocalScannerDebugRuntime
-    ? Promise.resolve()
-    :
-  fetch('http://127.0.0.1:7777/event', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: 'barcode-scan-failure',
-      runId,
-      hypothesisId,
-      location: 'VotingBoothView.vue',
-      msg: `[DEBUG] ${msg}`,
-      data,
-      ts: Date.now(),
-    }),
-  }).catch(() => {})
-// #endregion
 const brandingVars = computed(() => {
   const palette = resolveBrandingColors(brandingColors.value)
 
@@ -203,7 +181,9 @@ const canFlipCamera = computed(
 )
 const roundInfo = computed(() => roundSummary.value)
 const finishedRoundInfo = computed(() => finishedRoundSummary.value)
-const displayRound = computed(() => roundInfo.value || finishedRoundInfo.value)
+const rosterInfo = computed(() => rosterSummary.value)
+const displayRound = computed(() => roundInfo.value || finishedRoundInfo.value || rosterInfo.value)
+const isRosterState = computed(() => !roundInfo.value && Boolean(rosterInfo.value))
 const isFinishedRoundState = computed(() => !roundInfo.value && Boolean(finishedRoundInfo.value))
 const finishedRoundVisibility = computed(() => {
   const visibility = finishedRoundInfo.value?.resultVisibility
@@ -219,6 +199,14 @@ const hasPublishedWinners = computed(
 const showResultsOnlyPage = computed(
   () => isFinishedRoundState.value && finishedRoundVisibility.value === 'VISIBLE' && hasPublishedWinners.value,
 )
+const rosterSections = computed(() => rosterInfo.value?.sections || [])
+const filledRosterSections = computed(() =>
+  rosterSections.value.filter((section) => (section.associates?.length || 0) > 0),
+)
+const rosterAssociateCount = computed(() =>
+  rosterSections.value.reduce((sum, section) => sum + (section.associates?.length || 0), 0),
+)
+const rosterSectionCount = computed(() => filledRosterSections.value.length)
 const showConfirmVoteStep = computed(
   () => isCameraModalOpen.value && Boolean(pendingVoteCard.value && verifiedVoter.value),
 )
@@ -247,7 +235,9 @@ const countdownParts = computed(() => {
     isEnded: diff <= 0,
   }
 })
-const heroEyebrowLabel = computed(() => (isFinishedRoundState.value ? 'Voting Closed' : 'Live Round'))
+const heroEyebrowLabel = computed(() =>
+  isRosterState.value ? 'Roster Live' : isFinishedRoundState.value ? 'Voting Closed' : 'Live Round',
+)
 const publicWinnerCards = computed(() => {
   const ordered = finishedRoundInfo.value?.winners || []
   const first = ordered.find((entry) => entry.place === 1)
@@ -257,7 +247,9 @@ const publicWinnerCards = computed(() => {
 })
 const heroTitle = computed(() => displayRound.value?.name || 'Voting Round')
 const heroDescription = computed(() =>
-  isFinishedRoundState.value
+  isRosterState.value
+    ? displayRound.value?.description || 'Review the published roster sections and the assigned associates below.'
+    : isFinishedRoundState.value
     ? hasPublishedWinners.value
       ? 'The voting round is finished and the official top 3 winners are now live below.'
       : 'This voting round has finished. Please wait for the result announcement from the admin.'
@@ -453,12 +445,14 @@ const loadPublicVotingPage = async () => {
     if (!response.hasActiveRound || !response.round) {
       roundSummary.value = null
       finishedRoundSummary.value = response.finishedRound || null
+      rosterSummary.value = response.roster || null
       publicCategories.value = []
       return
     }
 
     roundSummary.value = response.round
     finishedRoundSummary.value = null
+    rosterSummary.value = null
     publicCategories.value = response.categories || []
   } catch (error) {
     homeSiteLogo.value = ''
@@ -466,6 +460,7 @@ const loadPublicVotingPage = async () => {
     homeSiteTagline.value = ''
     roundSummary.value = null
     finishedRoundSummary.value = null
+    rosterSummary.value = null
     publicCategories.value = []
     setError(error.message || 'Unable to load the live voting page.')
   } finally {
@@ -616,21 +611,9 @@ const handleScannedCode = async (scannedValue) => {
   const now = Date.now()
 
   if (!normalizedValue || (normalizedValue === lastDetectedBadge && now - lastDetectedAt <= 1500)) {
-    // #region debug-point D:duplicate-or-empty
-    reportScannerDebug('D', 'Public scanner ignored scanned value', {
-      normalizedValue: normalizedValue || '',
-      isDuplicate: normalizedValue === lastDetectedBadge,
-      duplicateAgeMs: now - lastDetectedAt,
-    })
-    // #endregion
     return
   }
 
-  // #region debug-point D:decoded
-  reportScannerDebug('D', 'Public scanner decoded barcode', {
-    normalizedValue,
-  })
-  // #endregion
   lastDetectedBadge = normalizedValue
   lastDetectedAt = now
   badgeId.value = normalizedValue
@@ -645,15 +628,6 @@ const handleScannedCode = async (scannedValue) => {
 }
 
 const startScanner = async (constraints) => {
-  // #region debug-point A:start-scanner
-  reportScannerDebug('A', 'Public scanner starting', {
-    selectedCameraId: selectedCameraId.value || '',
-    cameraMode: cameraMode.value,
-    constraints,
-    hasVideoElement: Boolean(videoRef.value),
-    videoReadyState: videoRef.value?.readyState ?? null,
-  })
-  // #endregion
   const hints = new Map()
   hints.set(DecodeHintType.POSSIBLE_FORMATS, scannerFormats)
   hints.set(DecodeHintType.TRY_HARDER, true)
@@ -690,12 +664,6 @@ const startScanner = async (constraints) => {
       }
 
       if (error && !(error instanceof NotFoundException)) {
-        // #region debug-point E:scanner-error
-        reportScannerDebug('E', 'Public scanner callback error', {
-          name: error?.name || 'UnknownError',
-          message: error?.message || '',
-        })
-        // #endregion
         scannerMessage.value = 'Scanning camera is active. Keep the badge near the center line for instant detection.'
       }
     },
@@ -723,13 +691,6 @@ const openCamera = async () => {
       selectedCameraId.value = getPreferredCameraId()
     }
 
-    // #region debug-point B:camera-ready-to-start
-    reportScannerDebug('B', 'Public camera list prepared', {
-      availableCameraCount: availableCameras.value.length,
-      selectedCameraId: selectedCameraId.value || '',
-      cameraMode: cameraMode.value,
-    })
-    // #endregion
     await startScanner(buildScannerConstraints())
     await optimizeScannerTrack()
     scannerTuneInterval = window.setInterval(() => {
@@ -739,12 +700,6 @@ const openCamera = async () => {
     isCameraOpen.value = true
     scannerMessage.value = 'Camera is ready. Move the badge across the scanner line. Detection is now optimized for faster reads.'
   } catch (error) {
-    // #region debug-point E:open-camera-failed
-    reportScannerDebug('E', 'Public camera failed to open', {
-      name: error?.name || 'UnknownError',
-      message: error?.message || '',
-    })
-    // #endregion
     setError(error.message || 'Unable to access the camera.')
     scannerMessage.value = 'Camera permission is required for scanning.'
   } finally {
@@ -1013,20 +968,48 @@ onBeforeUnmount(() => {
               </p>
               <div class="mt-5 grid grid-cols-2 gap-3 sm:mt-6 sm:flex sm:flex-wrap">
                 <div class="inline-flex w-full items-center gap-2 rounded-full bg-white/15 px-3 py-2 text-xs text-white/95 ring-1 ring-white/15 sm:w-auto sm:px-4 sm:text-sm">
-                  <span class="material-symbols-outlined text-base">calendar_month</span>
-                  {{ formatDateRange(displayRound?.startDate, displayRound?.endDate) || 'Schedule not available' }}
+                  <span class="material-symbols-outlined text-base">
+                    {{ isRosterState ? 'dashboard_customize' : 'calendar_month' }}
+                  </span>
+                  {{
+                    isRosterState
+                      ? `${rosterSectionCount} sections live`
+                      : formatDateRange(displayRound?.startDate, displayRound?.endDate) || 'Schedule not available'
+                  }}
                 </div>
                 <div class="inline-flex w-full items-center gap-2 rounded-full bg-white/15 px-3 py-2 text-xs text-white/95 ring-1 ring-white/15 sm:w-auto sm:px-4 sm:text-sm">
-                  <span class="material-symbols-outlined text-base">verified_user</span>
-                  One vote per associate
+                  <span class="material-symbols-outlined text-base">
+                    {{ isRosterState ? 'groups' : isFinishedRoundState ? 'campaign' : 'verified_user' }}
+                  </span>
+                  {{
+                    isRosterState
+                      ? `${rosterAssociateCount} associates assigned`
+                      : isFinishedRoundState
+                        ? hasPublishedWinners
+                          ? `${finishedRoundInfo?.winners?.length || 0} winners published`
+                          : 'Waiting for result'
+                        : 'One vote per associate'
+                  }}
                 </div>
               </div>
             </div>
           </div>
 
           <div class="public-brand-timer rounded-[32px] border p-5 shadow-[0_14px_40px_rgba(16,185,129,0.08)] sm:p-6">
-            <p class="text-xs font-semibold uppercase tracking-[0.2em] public-brand-accent-text">Voting Timer</p>
-            <div class="mt-3 flex flex-wrap gap-2">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] public-brand-accent-text">
+              {{ isRosterState ? 'Roster Overview' : 'Voting Timer' }}
+            </p>
+            <div v-if="isRosterState" class="mt-3 grid gap-3 sm:grid-cols-2">
+              <div class="public-brand-countdown-chip rounded-2xl border px-4 py-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Sections Filled</p>
+                <p class="mt-2 text-3xl font-semibold text-slate-900">{{ rosterSectionCount }}</p>
+              </div>
+              <div class="public-brand-countdown-chip rounded-2xl border px-4 py-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Associates</p>
+                <p class="mt-2 text-3xl font-semibold text-slate-900">{{ rosterAssociateCount }}</p>
+              </div>
+            </div>
+            <div v-else class="mt-3 flex flex-wrap gap-2">
               <template v-if="countdownDisplayParts.length">
                 <div
                   v-for="segment in countdownDisplayParts"
@@ -1045,10 +1028,17 @@ onBeforeUnmount(() => {
             </div>
             <p class="mt-2 text-sm text-slate-500">
               <span v-if="isLoadingRound">Loading live voting page...</span>
-              <span v-else>{{ displayRound?.name || 'No live voting round' }}</span>
+              <span v-else>
+                {{
+                  isRosterState
+                    ? displayRound?.name || 'No live roster'
+                    : displayRound?.name || 'No live voting round'
+                }}
+              </span>
             </p>
 
             <button
+              v-if="!isRosterState && !isFinishedRoundState"
               type="button"
               @click="isMobileTipsModalOpen = true"
               class="public-brand-outline mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border bg-white/90 px-4 text-sm font-medium text-slate-700 transition sm:hidden"
@@ -1057,7 +1047,7 @@ onBeforeUnmount(() => {
               How It Works & Scanner Tips
             </button>
 
-            <div class="mt-6 hidden gap-3 sm:grid">
+            <div v-if="!isRosterState && !isFinishedRoundState" class="mt-6 hidden gap-3 sm:grid">
               <div class="rounded-2xl border border-white/80 bg-white/85 px-4 py-4 shadow-sm">
                 <p class="text-sm font-semibold text-slate-900">How It Works</p>
                 <p class="mt-1 text-sm text-slate-500">Choose a nominee card, scan your badge, then confirm your vote.</p>
@@ -1072,7 +1062,14 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="mt-6 rounded-[36px] border border-white/70 bg-white/82 p-6 shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur">
-        <div v-if="!isFinishedRoundState" class="flex flex-col gap-2">
+        <div v-if="isRosterState" class="flex flex-col gap-2">
+          <p class="text-xl font-semibold text-slate-900">Published Roster</p>
+          <p class="text-sm text-slate-500">
+            Review the active roster sections and the associates assigned to each team below.
+          </p>
+        </div>
+
+        <div v-else-if="!isFinishedRoundState" class="flex flex-col gap-2">
           <p class="text-xl font-semibold text-slate-900">Choose A Nominee</p>
           <p class="text-sm text-slate-500">
             Tap `Vote` on any nominee card below to open the scanner and submit your badge.
@@ -1171,6 +1168,62 @@ onBeforeUnmount(() => {
               </div>
             </article>
           </div>
+        </div>
+
+        <div v-else-if="isRosterState" class="mt-6 grid gap-5 xl:grid-cols-2">
+          <article
+            v-for="section in rosterSections"
+            :key="section.key"
+            class="rounded-[30px] border border-white/80 bg-[linear-gradient(180deg,_rgba(255,255,255,0.98),_rgba(248,250,252,0.98))] p-5 shadow-[0_14px_45px_rgba(15,23,42,0.05)]"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <div class="public-brand-category flex h-12 w-12 items-center justify-center rounded-2xl">
+                  <span class="material-symbols-outlined text-xl">groups</span>
+                </div>
+                <div>
+                  <p class="text-lg font-semibold text-slate-900">{{ section.label }}</p>
+                  <p class="mt-1 text-sm text-slate-500">
+                    {{ section.associates.length ? 'Assigned team members' : 'No associates assigned yet' }}
+                  </p>
+                </div>
+              </div>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                {{ section.associates.length }} associates
+              </span>
+            </div>
+
+            <div v-if="section.associates.length" class="mt-5 grid gap-3">
+              <div
+                v-for="associate in section.associates"
+                :key="associate.id"
+                class="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 shadow-sm"
+              >
+                <div class="public-brand-avatar flex h-12 w-12 items-center justify-center overflow-hidden rounded-full ring-4">
+                  <img
+                    v-if="associate.photoData"
+                    :src="associate.photoData"
+                    :alt="associate.fullName"
+                    class="h-full w-full object-cover"
+                  />
+                  <span v-else class="text-sm font-semibold">{{ getInitials(associate.fullName) }}</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-semibold text-slate-900">{{ associate.fullName }}</p>
+                  <p class="mt-1 truncate text-xs text-slate-400">
+                    {{ associate.badgeId }} · {{ associate.departmentName }} / {{ associate.roleName }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-else
+              class="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500"
+            >
+              This section is currently empty.
+            </div>
+          </article>
         </div>
 
         <div v-else-if="!roundInfo && !isLoadingRound" class="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
