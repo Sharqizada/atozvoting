@@ -819,6 +819,7 @@ const openCamera = async (mode = 'vote') => {
   scannerContext.value = mode
   clearMessages()
   if (mode === 'roster') {
+    resetPendingVote()
     clearRosterLookupFeedback()
   }
   isCameraModalOpen.value = true

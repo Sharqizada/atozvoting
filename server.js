@@ -4530,7 +4530,7 @@ const ROSTER_V2_SECTIONS = Object.freeze([
 const rosterV2SectionLabelMap = new Map(ROSTER_V2_SECTIONS.map((section) => [section.key, section.label]))
 const STATION_V2_FLOORS = Object.freeze(['P2', 'P3', 'P4'])
 const STATION_V2_TYPES = Object.freeze(['AR', 'UNIVERSAL', 'QUANTITY_STOW'])
-const ROSTER_V2_STATION_SECTIONS = new Set(['STOW', 'CUBISCAN', 'QUANTITY_STOW'])
+const ROSTER_V2_STATION_SECTIONS = new Set(['STOW', 'QUANTITY_STOW'])
 const ROSTER_V2_DETAIL_OPTIONS = Object.freeze({
   ISS: [
     { key: 'RECEIVE_ANDON', label: 'Receive Andon' },
@@ -4754,10 +4754,45 @@ const getRosterLookupAssignmentLabel = (row) => {
     return 'Now Assigned'
   }
 
-  const sectionLabel = rosterV2SectionLabelMap.get(normalizeRosterV2SectionKey(row.section_key)) || row.section_key
+  const sectionKey = normalizeRosterV2SectionKey(row.section_key)
+  const sectionLabel = rosterV2SectionLabelMap.get(sectionKey) || row.section_key
+  const detailLabel = getRosterV2DetailLabel(row.detail_key)
+  const floorCode = normalizeRosterV2Floor(row.floor_code)
   const stationCode = `${row.station_code || ''}`.trim()
 
-  return stationCode ? `${sectionLabel} - ${stationCode}` : `${sectionLabel} - No Station`
+  if (sectionKey === 'ISS') {
+    if (!detailLabel) {
+      return floorCode ? `${sectionLabel} - ${floorCode}` : sectionLabel
+    }
+
+    return /\bP[234]\b/.test(detailLabel.toUpperCase())
+      ? `${sectionLabel} - ${detailLabel}`
+      : floorCode
+        ? `${sectionLabel} - ${detailLabel} - ${floorCode}`
+        : `${sectionLabel} - ${detailLabel}`
+  }
+
+  if (sectionKey === 'WATER_SPIDER') {
+    if (detailLabel) {
+      return detailLabel
+    }
+
+    return floorCode ? `${floorCode} Water Spider` : sectionLabel
+  }
+
+  if (sectionKey === 'CUBISCAN' || sectionKey === 'STOW_PG') {
+    return sectionLabel
+  }
+
+  if (sectionKey === 'STOW' || sectionKey === 'QUANTITY_STOW') {
+    return stationCode ? `${sectionLabel} - ${stationCode}` : sectionLabel
+  }
+
+  if (detailLabel) {
+    return `${sectionLabel} - ${detailLabel}`
+  }
+
+  return stationCode ? `${sectionLabel} - ${stationCode}` : sectionLabel
 }
 
 const parseRosterAssignmentsV2 = (assignments) => {
@@ -5376,4 +5411,3 @@ app.get('/api/voting/live-ballot-v2', async (_req, res) => {
     return res.status(500).json({ message: 'Unable to load the live ballot.', error: error.message })
   }
 })
-

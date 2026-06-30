@@ -233,8 +233,7 @@ const inferFloorCodeFromDetailKey = (detailKey) => {
   return normalizeFloorCode(matchedFloor)
 }
 const isQuantityStowSection = (sectionKey) => normalizeSectionKey(sectionKey) === 'QUANTITY_STOW'
-const supportsStationAssignment = (sectionKey) =>
-  ['STOW', 'CUBISCAN', 'QUANTITY_STOW'].includes(normalizeSectionKey(sectionKey))
+const supportsStationAssignment = (sectionKey) => ['STOW', 'QUANTITY_STOW'].includes(normalizeSectionKey(sectionKey))
 const getSectionDetailOptions = (sectionKey) => sectionDetailOptions.value[normalizeSectionKey(sectionKey)] || []
 const requiresDetailSelection = (sectionKey) => getSectionDetailOptions(sectionKey).length > 0
 const formatStationTypeLabel = (stationType) => {
@@ -338,8 +337,13 @@ const sanitizeAssignment = (assignment) => {
 }
 const getSectionDetailLabel = (sectionKey, detailKey) =>
   getSectionDetailOptions(sectionKey).find((option) => option.key === detailKey)?.label || detailKey || ''
-const getAssignmentStationLabel = (assignment) =>
-  assignment?.stationId ? stationLookup.value[assignment.stationId]?.displayLabel || 'Station selected.' : 'No station assigned.'
+const getAssignmentStationLabel = (assignment) => {
+  if (!supportsStationAssignment(assignment?.sectionKey)) {
+    return ''
+  }
+
+  return assignment?.stationId ? stationLookup.value[assignment.stationId]?.displayLabel || 'Station selected.' : 'No station assigned.'
+}
 const getAssignmentCardSummary = (employeeId) => {
   const assignment = assignmentLookup.value[employeeId]
 
@@ -1013,7 +1017,7 @@ const deleteRoster = async (roster) => {
                   </button>
                 </div>
 
-                <div class="mt-4 space-y-3">
+                <div class="mt-4 grid gap-3 sm:grid-cols-2">
                   <div
                     v-for="section in sectionSummary"
                     :key="section.key"
@@ -1363,7 +1367,7 @@ const deleteRoster = async (roster) => {
                   {{ item.station.displayLabel }}
                 </span>
                 <span
-                  v-else
+                  v-else-if="supportsStationAssignment(item.assignment.sectionKey)"
                   class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500"
                 >
                   No station assigned
