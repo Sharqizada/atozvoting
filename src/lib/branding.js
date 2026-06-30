@@ -6,6 +6,8 @@ export const DEFAULT_BRANDING_COLORS = Object.freeze({
   borderColor: '#A7F3D0',
 })
 
+const SITE_BRANDING_CACHE_KEY = 'siteBrandingCacheV1'
+
 const HEX_COLOR_PATTERN = /^#?(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 export const normalizeBrandingColor = (value, fallback) => {
@@ -35,6 +37,68 @@ export const resolveBrandingColors = (source = {}) => ({
   surfaceColor: normalizeBrandingColor(source.surfaceColor, DEFAULT_BRANDING_COLORS.surfaceColor),
   borderColor: normalizeBrandingColor(source.borderColor, DEFAULT_BRANDING_COLORS.borderColor),
 })
+
+export const normalizeSiteBranding = (source = {}) => ({
+  siteName: `${source.siteName || ''}`.trim(),
+  siteTagline: `${source.siteTagline || ''}`.trim(),
+  siteLogo: `${source.siteLogo || ''}`.trim(),
+  siteFavicon: `${source.siteFavicon || source.favicon || ''}`.trim(),
+  brandingColors: resolveBrandingColors(source.brandingColors || source),
+})
+
+export const getCachedSiteBranding = () => {
+  if (typeof window === 'undefined') {
+    return normalizeSiteBranding()
+  }
+
+  try {
+    const cachedValue = window.localStorage.getItem(SITE_BRANDING_CACHE_KEY)
+    return cachedValue ? normalizeSiteBranding(JSON.parse(cachedValue)) : normalizeSiteBranding()
+  } catch {
+    return normalizeSiteBranding()
+  }
+}
+
+const ensureFaviconLinkElement = () => {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  let link = document.querySelector('link[rel="icon"]')
+
+  if (!link) {
+    link = document.createElement('link')
+    link.setAttribute('rel', 'icon')
+    document.head.appendChild(link)
+  }
+
+  return link
+}
+
+export const applySiteFavicon = (favicon = '') => {
+  const faviconLink = ensureFaviconLinkElement()
+
+  if (!faviconLink) {
+    return
+  }
+
+  faviconLink.setAttribute('href', `${favicon || '/favicon.ico'}`)
+}
+
+export const syncSiteBrandingCache = (source = {}) => {
+  const normalized = normalizeSiteBranding(source)
+
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(SITE_BRANDING_CACHE_KEY, JSON.stringify(normalized))
+    } catch {
+      // Ignore storage failures and still apply favicon in-memory.
+    }
+  }
+
+  applySiteFavicon(normalized.siteFavicon)
+  return normalized
+}
 
 export const hexToRgba = (hexColor, alpha = 1) => {
   const normalized = normalizeBrandingColor(hexColor, '#000000').slice(1)

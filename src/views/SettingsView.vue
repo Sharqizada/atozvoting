@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import AdminShell from '../components/AdminShell.vue'
 import { useAdminPage } from '../composables/useAdminPage'
-import { hexToRgba, resolveBrandingColors } from '../lib/branding'
+import { hexToRgba, resolveBrandingColors, syncSiteBrandingCache } from '../lib/branding'
 import { postJson } from '../lib/api'
 
 const { data, error, load } = useAdminPage('/api/settings', {
@@ -10,6 +10,7 @@ const { data, error, load } = useAdminPage('/api/settings', {
     siteName: '',
     siteTagline: '',
     siteLogo: '',
+    siteFavicon: '',
     timezone: '',
     dateFormat: '',
     timeFormat: '',
@@ -34,10 +35,18 @@ const saveError = ref('')
 const saveSuccess = ref('')
 const isSaving = ref(false)
 const logoInputRef = ref(null)
+const faviconInputRef = ref(null)
+const isFaviconCropModalOpen = ref(false)
+const faviconCropSource = ref('')
+const faviconCropImage = ref(null)
+const faviconCropZoom = ref(1)
+const faviconCropOffsetX = ref(0)
+const faviconCropOffsetY = ref(0)
 const siteInfo = reactive({
   siteName: '',
   siteTagline: '',
   siteLogo: '',
+  siteFavicon: '',
   timezone: '',
   dateFormat: '',
   timeFormat: '',
@@ -81,6 +90,28 @@ const brandingIconPreviewStyle = computed(() => ({
   color: previewBranding.value.accentColor,
   backgroundColor: hexToRgba(previewBranding.value.accentColor, 0.12),
 }))
+const faviconBaseScale = computed(() => {
+  const image = faviconCropImage.value
+
+  if (!image) {
+    return 1
+  }
+
+  return 256 / Math.min(image.width || 1, image.height || 1)
+})
+const faviconCropPreviewStyle = computed(() => {
+  const image = faviconCropImage.value
+
+  if (!image) {
+    return {}
+  }
+
+  return {
+    width: `${Math.max(1, Math.round((image.width || 1) * faviconBaseScale.value))}px`,
+    height: `${Math.max(1, Math.round((image.height || 1) * faviconBaseScale.value))}px`,
+    transform: `translate(calc(-50% + ${faviconCropOffsetX.value}px), calc(-50% + ${faviconCropOffsetY.value}px)) scale(${faviconCropZoom.value})`,
+  }
+})
 
 watch(
   data,
@@ -89,6 +120,21 @@ watch(
     Object.assign(brandingColors, resolveBrandingColors(value.brandingColors || {}))
     Object.assign(votingSettings, value.votingSettings || {})
     Object.assign(emailSettings, value.emailSettings || {})
+
+    if (
+      value.siteInfo?.siteName ||
+      value.siteInfo?.siteTagline ||
+      value.siteInfo?.siteLogo ||
+      value.siteInfo?.siteFavicon
+    ) {
+      syncSiteBrandingCache({
+        siteName: value.siteInfo?.siteName,
+        siteTagline: value.siteInfo?.siteTagline,
+        siteLogo: value.siteInfo?.siteLogo,
+        siteFavicon: value.siteInfo?.siteFavicon,
+        brandingColors: value.brandingColors || {},
+      })
+    }
   },
   { immediate: true },
 )
@@ -102,6 +148,18 @@ const clearLogo = () => {
 
   if (logoInputRef.value) {
     logoInputRef.value.value = ''
+  }
+}
+
+const openFaviconPicker = () => {
+  faviconInputRef.value?.click()
+}
+
+const clearFavicon = () => {
+  siteInfo.siteFavicon = ''
+
+  if (faviconInputRef.value) {
+    faviconInputRef.value.value = ''
   }
 }
 
@@ -120,6 +178,23 @@ const loadImageElement = (src) =>
     image.onerror = () => reject(new Error('Unable to process the selected logo image.'))
     image.src = src
   })
+
+const resetFaviconCropState = () => {
+  faviconCropSource.value = ''
+  faviconCropImage.value = null
+  faviconCropZoom.value = 1
+  faviconCropOffsetX.value = 0
+  faviconCropOffsetY.value = 0
+}
+
+const closeFaviconCropModal = () => {
+  isFaviconCropModalOpen.value = false
+  resetFaviconCropState()
+
+  if (faviconInputRef.value) {
+    faviconInputRef.value.value = ''
+  }
+}
 
 const buildOptimizedLogoDataUrl = async (file) => {
   if (file.type === 'image/svg+xml') {
@@ -144,6 +219,36 @@ const buildOptimizedLogoDataUrl = async (file) => {
 
   context.drawImage(image, 0, 0, width, height)
   return canvas.toDataURL('image/webp', 0.82)
+}
+
+const buildCroppedFaviconDataUrl = async () => {
+  const image = faviconCropImage.value
+
+  if (!image) {
+    throw new Error('Choose a favicon image first.')
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 256
+
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('Unable to prepare the favicon image.')
+  }
+
+  const drawWidth = Math.max(1, (image.width || 1) * faviconBaseScale.value * faviconCropZoom.value)
+  const drawHeight = Math.max(1, (image.height || 1) * faviconBaseScale.value * faviconCropZoom.value)
+  const drawX = 128 + faviconCropOffsetX.value - drawWidth / 2
+  const drawY = 128 + faviconCropOffsetY.value - drawHeight / 2
+
+  context.clearRect(0, 0, canvas.width, canvas.height)
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(image, drawX, drawY, drawWidth, drawHeight)
+
+  return canvas.toDataURL('image/png')
 }
 
 const handleLogoSelection = async (event) => {
@@ -174,6 +279,51 @@ const handleLogoSelection = async (event) => {
   }
 }
 
+const handleFaviconSelection = async (event) => {
+  const file = event.target?.files?.[0]
+
+  if (!file) {
+    return
+  }
+
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') {
+    saveError.value = 'Please choose a PNG, JPG, or WEBP image for the favicon.'
+    event.target.value = ''
+    return
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    saveError.value = 'Favicon image must be 5MB or smaller.'
+    event.target.value = ''
+    return
+  }
+
+  try {
+    const sourceUrl = await readFileAsDataUrl(file)
+    faviconCropImage.value = await loadImageElement(sourceUrl)
+    faviconCropSource.value = sourceUrl
+    faviconCropZoom.value = 1
+    faviconCropOffsetX.value = 0
+    faviconCropOffsetY.value = 0
+    isFaviconCropModalOpen.value = true
+    saveError.value = ''
+  } catch (error) {
+    saveError.value = error.message || 'Unable to process the selected favicon file.'
+    event.target.value = ''
+    resetFaviconCropState()
+  }
+}
+
+const applyFaviconCrop = async () => {
+  try {
+    siteInfo.siteFavicon = await buildCroppedFaviconDataUrl()
+    saveError.value = ''
+    closeFaviconCropModal()
+  } catch (error) {
+    saveError.value = error.message || 'Unable to crop the favicon image.'
+  }
+}
+
 const saveSettings = async () => {
   saveError.value = ''
   saveSuccess.value = ''
@@ -187,6 +337,13 @@ const saveSettings = async () => {
       emailSettings,
     })
     await load()
+    syncSiteBrandingCache({
+      siteName: siteInfo.siteName,
+      siteTagline: siteInfo.siteTagline,
+      siteLogo: siteInfo.siteLogo,
+      siteFavicon: siteInfo.siteFavicon,
+      brandingColors,
+    })
     saveSuccess.value = 'Settings saved successfully.'
   } catch (requestError) {
     saveError.value = requestError.message || 'Unable to save settings.'
@@ -226,7 +383,8 @@ const saveSettings = async () => {
         <p class="mt-1 text-sm text-slate-500">Update the logo, title, and subtitle shown on the public home page.</p>
 
         <div class="mt-6 grid gap-6 lg:grid-cols-[280px_1fr]">
-          <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+          <div class="space-y-4">
+            <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5">
             <p class="text-sm font-medium text-slate-700">Logo Preview</p>
             <div class="mt-4 flex h-28 w-28 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white">
               <img
@@ -253,6 +411,36 @@ const saveSettings = async () => {
               </button>
             </div>
             <p class="mt-3 text-xs text-slate-400">PNG, JPG, WEBP, or SVG. Large images are optimized automatically before save.</p>
+            </div>
+
+            <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <p class="text-sm font-medium text-slate-700">Favicon Preview</p>
+              <div class="mt-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <img
+                  v-if="siteInfo.siteFavicon"
+                  :src="siteInfo.siteFavicon"
+                  alt="Site favicon"
+                  class="h-full w-full object-cover"
+                />
+                <span v-else class="material-symbols-outlined text-4xl text-slate-300">tabs</span>
+              </div>
+              <input
+                ref="faviconInputRef"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                class="hidden"
+                @change="handleFaviconSelection"
+              />
+              <div class="mt-4 flex flex-wrap gap-3">
+                <button type="button" @click="openFaviconPicker" class="inline-flex h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm text-blue-600">
+                  Change Favicon
+                </button>
+                <button v-if="siteInfo.siteFavicon" type="button" @click="clearFavicon" class="inline-flex h-11 items-center rounded-xl border border-rose-200 bg-white px-4 text-sm text-rose-600">
+                  Remove
+                </button>
+              </div>
+              <p class="mt-3 text-xs text-slate-400">PNG, JPG, or WEBP. A square crop is required before save.</p>
+            </div>
           </div>
 
           <div class="grid gap-4 md:grid-cols-2">
@@ -422,4 +610,88 @@ const saveSettings = async () => {
       </article>
     </section>
   </AdminShell>
+
+  <div
+    v-if="isFaviconCropModalOpen"
+    class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/70 px-4 py-6 backdrop-blur-sm"
+  >
+    <div class="flex w-full max-w-3xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl">
+      <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+        <div>
+          <p class="text-xl font-semibold text-slate-900">Crop Favicon</p>
+          <p class="mt-1 text-sm text-slate-500">Adjust the square crop before saving the website favicon.</p>
+        </div>
+        <button
+          type="button"
+          @click="closeFaviconCropModal"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500"
+        >
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div class="grid gap-6 px-5 py-5 sm:px-6 lg:grid-cols-[300px_1fr]">
+        <div class="flex flex-col items-center">
+          <div class="relative h-64 w-64 overflow-hidden rounded-[28px] border border-slate-200 bg-slate-100 shadow-inner">
+            <img
+              v-if="faviconCropSource"
+              :src="faviconCropSource"
+              alt="Favicon crop preview"
+              class="absolute left-1/2 top-1/2 max-w-none select-none"
+              :style="faviconCropPreviewStyle"
+            />
+            <div class="pointer-events-none absolute inset-0 border-[10px] border-white/35"></div>
+          </div>
+          <div class="mt-4 flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <img
+              v-if="siteInfo.siteFavicon"
+              :src="siteInfo.siteFavicon"
+              alt="Current favicon"
+              class="h-full w-full object-cover"
+            />
+            <img
+              v-else-if="faviconCropSource"
+              :src="faviconCropSource"
+              alt="Pending favicon"
+              class="h-full w-full object-cover"
+            />
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <label class="block rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <span class="block text-sm font-medium text-slate-700">Zoom</span>
+            <input v-model="faviconCropZoom" type="range" min="1" max="3" step="0.05" class="mt-3 w-full" />
+          </label>
+
+          <label class="block rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <span class="block text-sm font-medium text-slate-700">Move Left / Right</span>
+            <input v-model="faviconCropOffsetX" type="range" min="-180" max="180" step="1" class="mt-3 w-full" />
+          </label>
+
+          <label class="block rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <span class="block text-sm font-medium text-slate-700">Move Up / Down</span>
+            <input v-model="faviconCropOffsetY" type="range" min="-180" max="180" step="1" class="mt-3 w-full" />
+          </label>
+
+          <div class="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              @click="closeFaviconCropModal"
+              class="inline-flex h-11 items-center rounded-xl border border-slate-200 px-4 text-sm text-slate-600"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              @click="applyFaviconCrop"
+              class="inline-flex h-11 items-center rounded-xl bg-blue-600 px-4 text-sm font-medium text-white"
+            >
+              Apply Crop
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>

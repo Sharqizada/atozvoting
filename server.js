@@ -39,6 +39,7 @@ const DEFAULT_SITE_INFO = Object.freeze({
   siteName: 'Inbound Star Voting',
   siteTagline: 'Recognize. Appreciate. Celebrate.',
   siteLogo: '',
+  siteFavicon: '',
   timezone: '(UTC+05:30) Asia/Kolkata',
   dateFormat: 'June 3, 2026',
   timeFormat: '12 Hour (hh:mm AM/PM)',
@@ -87,6 +88,7 @@ const getPublicBrandingSettings = (settings = {}) => ({
   siteName: settings.site_name || DEFAULT_SITE_INFO.siteName,
   siteTagline: settings.site_tagline || DEFAULT_SITE_INFO.siteTagline,
   siteLogo: settings.site_logo || DEFAULT_SITE_INFO.siteLogo,
+  siteFavicon: settings.site_favicon || DEFAULT_SITE_INFO.siteFavicon,
   brandingColors: getBrandingSettings(settings),
 })
 const normalizeRoundResultVisibility = (value, fallback = 'WAITING') => {
@@ -111,6 +113,7 @@ const getDefaultSettingEntries = () => [
   ['site_name', 'general', DEFAULT_SITE_INFO.siteName],
   ['site_tagline', 'general', DEFAULT_SITE_INFO.siteTagline],
   ['site_logo', 'general', DEFAULT_SITE_INFO.siteLogo],
+  ['site_favicon', 'general', DEFAULT_SITE_INFO.siteFavicon],
   ['timezone', 'general', DEFAULT_SITE_INFO.timezone],
   ['date_format', 'general', DEFAULT_SITE_INFO.dateFormat],
   ['time_format', 'general', DEFAULT_SITE_INFO.timeFormat],
@@ -240,6 +243,7 @@ const sanitizeImageData = (value, label = 'Image', maxLength = 2_000_000) => {
 }
 const sanitizePhotoData = (value) => sanitizeImageData(value, 'Associate photo')
 const sanitizeSiteLogoData = (value) => sanitizeImageData(value, 'Site logo', 1_500_000)
+const sanitizeSiteFaviconData = (value) => sanitizeImageData(value, 'Site favicon', 600_000)
 
 const parseIdList = (value) => {
   if (!Array.isArray(value)) {
@@ -1889,6 +1893,7 @@ app.get('/api/admin/meta', async (_req, res) => {
       siteName: settings.site_name || DEFAULT_SITE_INFO.siteName,
       siteTagline: settings.site_tagline || DEFAULT_SITE_INFO.siteTagline,
       siteLogo: settings.site_logo || DEFAULT_SITE_INFO.siteLogo,
+      siteFavicon: settings.site_favicon || DEFAULT_SITE_INFO.siteFavicon,
       brandingColors: getBrandingSettings(settings),
       notificationCount: warningRows[0]?.notification_count || 0,
       currentRoundName: activeRound?.name || '',
@@ -3989,6 +3994,7 @@ app.get('/api/settings', async (_req, res) => {
         siteName: settings.site_name,
         siteTagline: settings.site_tagline,
         siteLogo: settings.site_logo || '',
+        siteFavicon: settings.site_favicon || '',
         timezone: settings.timezone,
         dateFormat: settings.date_format,
         timeFormat: settings.time_format,
@@ -4038,13 +4044,16 @@ app.post('/api/settings', async (req, res) => {
   const votingSettings = req.body?.votingSettings || {}
   const emailSettings = req.body?.emailSettings || {}
   let siteLogo = null
+  let siteFavicon = null
 
   try {
     siteLogo = sanitizeSiteLogoData(siteInfo.siteLogo)
+    siteFavicon = sanitizeSiteFaviconData(siteInfo.siteFavicon)
     await upsertSettingEntries([
       ['site_name', 'general', siteInfo.siteName || DEFAULT_SITE_INFO.siteName],
       ['site_tagline', 'general', siteInfo.siteTagline || DEFAULT_SITE_INFO.siteTagline],
       ['site_logo', 'general', siteLogo || ''],
+      ['site_favicon', 'general', siteFavicon || ''],
       ['timezone', 'general', siteInfo.timezone || DEFAULT_SITE_INFO.timezone],
       ['date_format', 'general', siteInfo.dateFormat || DEFAULT_SITE_INFO.dateFormat],
       ['time_format', 'general', siteInfo.timeFormat || DEFAULT_SITE_INFO.timeFormat],
@@ -4067,7 +4076,7 @@ app.post('/api/settings', async (req, res) => {
 
     return res.json({ success: true, message: 'Settings saved successfully.' })
   } catch (error) {
-    const statusCode = /site logo/i.test(error.message || '') ? 400 : 500
+    const statusCode = /site logo|site favicon/i.test(error.message || '') ? 400 : 500
     return res.status(statusCode).json({ message: error.message || 'Unable to save settings.', error: error.message })
   }
 })
@@ -5257,19 +5266,23 @@ app.post('/api/public/roster-check', async (req, res) => {
     const employee = employeeRows[0] || null
     const targetRoster = (await getVisibleRoster()) || (await getLatestRosterV2())
 
-    if (!targetRoster || !employee) {
+    if (!employee) {
+      return res.status(404).json({
+        message: `Badge ID or Badge User Name "${badgeId || badgeUsername}" does not exist.`,
+      })
+    }
+
+    if (!targetRoster) {
       return res.json({
         success: true,
         assigned: false,
         assignmentLabel: 'Now Assigned',
-        rosterName: targetRoster?.name || '',
-        associate: employee
-          ? {
-              badgeId: employee.badge_id,
-              badgeUsername: employee.badge_username || '',
-              fullName: employee.full_name,
-            }
-          : null,
+        rosterName: '',
+        associate: {
+          badgeId: employee.badge_id,
+          badgeUsername: employee.badge_username || '',
+          fullName: employee.full_name,
+        },
       })
     }
 

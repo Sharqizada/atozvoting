@@ -8,14 +8,15 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
-import { hexToRgba, resolveBrandingColors } from '../lib/branding'
+import { getCachedSiteBranding, hexToRgba, resolveBrandingColors, syncSiteBrandingCache } from '../lib/branding'
 import { isWebNfcSupported, scanSingleNfcBadge } from '../lib/nfc'
 
 const router = useRouter()
-const homeSiteLogo = ref('')
-const homeSiteName = ref('')
-const homeSiteTagline = ref('')
-const brandingColors = ref(resolveBrandingColors())
+const cachedBranding = getCachedSiteBranding()
+const homeSiteLogo = ref(cachedBranding.siteLogo)
+const homeSiteName = ref(cachedBranding.siteName)
+const homeSiteTagline = ref(cachedBranding.siteTagline)
+const brandingColors = ref(resolveBrandingColors(cachedBranding.brandingColors))
 const roundSummary = ref(null)
 const finishedRoundSummary = ref(null)
 const rosterSummary = ref(null)
@@ -462,10 +463,11 @@ const loadPublicVotingPage = async () => {
 
   try {
     const response = await fetchJson('/api/voting/live-ballot-v2')
-    homeSiteLogo.value = response.siteLogo || ''
-    homeSiteName.value = response.siteName || ''
-    homeSiteTagline.value = response.siteTagline || ''
-    brandingColors.value = resolveBrandingColors(response.brandingColors || {})
+    const normalizedBranding = syncSiteBrandingCache(response)
+    homeSiteLogo.value = normalizedBranding.siteLogo
+    homeSiteName.value = normalizedBranding.siteName
+    homeSiteTagline.value = normalizedBranding.siteTagline
+    brandingColors.value = resolveBrandingColors(normalizedBranding.brandingColors)
 
     if (!response.hasActiveRound || !response.round) {
       roundSummary.value = null
@@ -1839,9 +1841,9 @@ onBeforeUnmount(() => {
 
 .public-brand-logo {
   color: var(--brand-accent);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), var(--brand-surface-soft));
-  box-shadow: 0 18px 40px var(--brand-primary-soft);
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: transparent;
+  box-shadow: none;
+  border: none;
 }
 
 .public-brand-hero {

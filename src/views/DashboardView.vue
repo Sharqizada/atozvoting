@@ -78,31 +78,31 @@ const votesOverviewStyle = computed(() => {
       {{ error }}
     </div>
 
-    <section class="grid gap-4 xl:grid-cols-4">
+    <section class="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
       <article
         v-for="card in summaryCards"
         :key="card.title"
-        class="rounded-3xl border border-slate-200 p-5"
+        class="rounded-3xl border border-slate-200 p-4 xl:p-5"
         :class="card.panelBg"
       >
         <div class="flex items-start gap-4">
           <div
-            class="flex h-14 w-14 items-center justify-center rounded-2xl text-white"
+            class="flex h-12 w-12 items-center justify-center rounded-2xl text-white xl:h-14 xl:w-14"
             :class="card.iconBg"
           >
-            <span class="material-symbols-outlined text-2xl">{{ card.icon }}</span>
+            <span class="material-symbols-outlined text-xl xl:text-2xl">{{ card.icon }}</span>
           </div>
           <div>
             <p class="text-sm text-slate-500">{{ card.title }}</p>
-            <p class="mt-1 text-3xl font-bold text-slate-900">{{ card.value }}</p>
-            <p class="mt-2 text-sm text-slate-400">{{ card.subtitle }}</p>
+            <p class="mt-1 text-2xl font-bold text-slate-900 xl:text-3xl">{{ card.value }}</p>
+            <p class="mt-2 text-xs text-slate-400 xl:text-sm">{{ card.subtitle }}</p>
           </div>
         </div>
       </article>
     </section>
 
-    <section class="mt-6 grid gap-6 xl:grid-cols-[1.25fr_1fr]">
-      <article class="rounded-3xl border border-slate-200 bg-white p-5">
+    <section class="mt-6 grid gap-5 xl:grid-cols-[1.25fr_1fr]">
+      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
         <div class="flex items-center justify-between gap-4">
           <div>
             <p class="text-lg font-semibold text-slate-900">Current Voting Round</p>
@@ -110,13 +110,13 @@ const votesOverviewStyle = computed(() => {
           </div>
         </div>
 
-        <div class="mt-5 flex flex-col gap-5 rounded-3xl border border-slate-200 p-5 lg:flex-row lg:items-center">
-          <div class="flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-            <span class="material-symbols-outlined text-4xl">calendar_month</span>
+        <div class="mt-5 flex flex-col gap-4 rounded-3xl border border-slate-200 p-4 lg:flex-row lg:items-center xl:p-5">
+          <div class="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-blue-600 xl:h-20 xl:w-20">
+            <span class="material-symbols-outlined text-3xl xl:text-4xl">calendar_month</span>
           </div>
           <div class="flex-1">
             <div class="flex flex-wrap items-center gap-3">
-              <p class="text-2xl font-bold text-slate-900">{{ currentRound.name }}</p>
+              <p class="text-xl font-bold text-slate-900 xl:text-2xl">{{ currentRound.name }}</p>
               <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="roundStatusClass">
                 {{ currentRound.status }}
               </span>
@@ -134,10 +134,10 @@ const votesOverviewStyle = computed(() => {
           </div>
         </div>
 
-        <div class="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+        <div class="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4 xl:p-5">
           <div class="grid gap-4 md:grid-cols-3">
             <div>
-              <p class="text-3xl font-bold text-slate-900">{{ currentRound.daysRemaining }}</p>
+              <p class="text-2xl font-bold text-slate-900 xl:text-3xl">{{ currentRound.daysRemaining }}</p>
               <p class="mt-2 text-sm text-slate-400">Days Remaining</p>
             </div>
             <div>
@@ -150,7 +150,7 @@ const votesOverviewStyle = computed(() => {
               </div>
             </div>
             <div class="md:text-right">
-              <p class="text-3xl font-bold text-slate-900">{{ currentRound.eligibleVoters }}</p>
+              <p class="text-2xl font-bold text-slate-900 xl:text-3xl">{{ currentRound.eligibleVoters }}</p>
               <p class="mt-2 text-sm text-slate-400">Eligible Voters</p>
             </div>
           </div>
@@ -164,7 +164,7 @@ const votesOverviewStyle = computed(() => {
         </div>
       </article>
 
-      <article class="rounded-3xl border border-slate-200 bg-white p-5">
+      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
         <div class="flex items-center justify-between gap-3">
           <div>
             <p class="text-lg font-semibold text-slate-900">Votes Overview</p>
@@ -178,14 +178,14 @@ const votesOverviewStyle = computed(() => {
           </button>
         </div>
 
-        <div class="mt-6 flex flex-col gap-6 lg:flex-row lg:items-center">
-          <div class="relative mx-auto flex h-52 w-52 items-center justify-center">
+        <div class="mt-6 flex flex-col gap-5 lg:flex-row lg:items-center">
+          <div class="relative mx-auto flex h-44 w-44 items-center justify-center xl:h-52 xl:w-52">
             <div
-              class="h-52 w-52 rounded-full"
+              class="h-44 w-44 rounded-full xl:h-52 xl:w-52"
               :style="votesOverviewStyle"
             ></div>
-            <div class="absolute flex h-28 w-28 flex-col items-center justify-center rounded-full bg-white">
-              <p class="text-3xl font-bold text-slate-900">{{ votesOverview.totalVotes }}</p>
+            <div class="absolute flex h-24 w-24 flex-col items-center justify-center rounded-full bg-white xl:h-28 xl:w-28">
+              <p class="text-2xl font-bold text-slate-900 xl:text-3xl">{{ votesOverview.totalVotes }}</p>
               <p class="text-sm text-slate-400">Total Votes</p>
             </div>
           </div>
@@ -207,8 +207,8 @@ const votesOverviewStyle = computed(() => {
       </article>
     </section>
 
-    <section class="mt-6 grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-      <article class="rounded-3xl border border-slate-200 bg-white p-5">
+    <section class="mt-6 grid gap-5 xl:grid-cols-[1.2fr_1fr]">
+      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
         <div class="flex items-center justify-between gap-3">
           <p class="text-lg font-semibold text-slate-900">Top Candidates (Current Round)</p>
           <button type="button" class="text-sm font-medium text-blue-600">View All Results</button>
@@ -240,7 +240,7 @@ const votesOverviewStyle = computed(() => {
         </div>
       </article>
 
-      <article class="rounded-3xl border border-slate-200 bg-white p-5">
+      <article class="rounded-3xl border border-slate-200 bg-white p-4 xl:p-5">
         <div class="flex items-center justify-between gap-3">
           <p class="text-lg font-semibold text-slate-900">Recent Activity</p>
           <button type="button" class="text-sm font-medium text-blue-600">View All Logs</button>

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { adminNavigationGroups, getAdminSession } from '../data/adminPanel'
 import { fetchJson } from '../lib/api'
+import { getCachedSiteBranding, syncSiteBrandingCache } from '../lib/branding'
 
 const props = defineProps({
   title: {
@@ -23,10 +24,12 @@ const route = useRoute()
 const router = useRouter()
 const mobileMenuOpen = ref(false)
 const adminSession = ref(getAdminSession())
+const cachedBranding = getCachedSiteBranding()
 const meta = ref({
-  siteName: '',
-  siteTagline: '',
-  siteLogo: '',
+  siteName: cachedBranding.siteName,
+  siteTagline: cachedBranding.siteTagline,
+  siteLogo: cachedBranding.siteLogo,
+  siteFavicon: cachedBranding.siteFavicon,
   notificationCount: 0,
 })
 
@@ -56,12 +59,21 @@ const handleMenuAction = (item) => {
 
 onMounted(async () => {
   try {
-    meta.value = await fetchJson('/api/admin/meta')
+    const response = await fetchJson('/api/admin/meta')
+    const normalizedBranding = syncSiteBrandingCache(response)
+    meta.value = {
+      ...response,
+      siteName: normalizedBranding.siteName,
+      siteTagline: normalizedBranding.siteTagline,
+      siteLogo: normalizedBranding.siteLogo,
+      siteFavicon: normalizedBranding.siteFavicon,
+    }
   } catch {
     meta.value = {
-      siteName: '',
-      siteTagline: '',
-      siteLogo: '',
+      siteName: cachedBranding.siteName,
+      siteTagline: cachedBranding.siteTagline,
+      siteLogo: cachedBranding.siteLogo,
+      siteFavicon: cachedBranding.siteFavicon,
       notificationCount: 0,
     }
   }
@@ -78,28 +90,28 @@ onMounted(async () => {
       ></div>
 
       <aside
-        class="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col bg-slate-950 text-white transition-transform duration-200 lg:z-30"
+        class="fixed inset-y-0 left-0 z-50 flex w-[256px] flex-col bg-slate-950 text-white transition-transform duration-200 xl:w-[272px] lg:z-30"
         :class="mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
       >
-        <div class="shrink-0 border-b border-white/10 px-5 py-6">
+        <div class="shrink-0 border-b border-white/10 px-4 py-5 xl:px-5 xl:py-6">
           <div class="flex items-start gap-3">
-            <div class="overflow-hidden rounded-2xl border border-amber-300/30 bg-amber-400/10 p-2">
+            <div class="overflow-hidden rounded-2xl border border-slate-700 bg-white p-2 shadow-sm">
               <img
                 v-if="meta.siteLogo"
                 :src="meta.siteLogo"
                 :alt="meta.siteName || 'Website logo'"
-                class="h-10 w-10 rounded-xl object-cover"
+                class="h-9 w-9 rounded-xl object-cover xl:h-10 xl:w-10"
               />
-              <span v-else class="material-symbols-outlined text-3xl text-amber-400">stars</span>
+              <span v-else class="material-symbols-outlined text-3xl text-slate-500">stars</span>
             </div>
-            <div>
-              <p class="text-xl font-bold">{{ meta.siteName }}</p>
-              <p class="text-sm text-slate-400">{{ meta.siteTagline }}</p>
+            <div class="min-w-0">
+              <p class="truncate text-lg font-bold xl:text-xl">{{ meta.siteName }}</p>
+              <p class="line-clamp-2 text-xs text-slate-400 xl:text-sm">{{ meta.siteTagline }}</p>
             </div>
           </div>
         </div>
 
-        <nav class="flex-1 overflow-y-auto px-4 py-5">
+        <nav class="flex-1 overflow-y-auto px-3 py-4 xl:px-4 xl:py-5">
           <div v-for="group in navigationGroups" :key="group.title || 'main'" class="mb-7">
             <p
               v-if="group.title"
@@ -113,7 +125,7 @@ onMounted(async () => {
                 :key="item.label"
                 type="button"
                 @click="handleMenuAction(item)"
-                class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition"
+                class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition xl:py-3"
                 :class="
                   item.active
                     ? 'bg-blue-600 text-white'
@@ -128,9 +140,9 @@ onMounted(async () => {
         </nav>
       </aside>
 
-      <div class="flex-1 lg:pl-[280px]">
+      <div class="flex-1 lg:pl-[256px] xl:pl-[272px]">
         <header
-          class="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 lg:fixed lg:left-[280px] lg:right-0"
+          class="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3 sm:px-5 lg:fixed lg:left-[256px] lg:right-0 xl:left-[272px]"
         >
           <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div class="flex items-center gap-4">
@@ -143,7 +155,7 @@ onMounted(async () => {
               </button>
 
               <div>
-                <h1 class="text-2xl font-bold text-slate-900 sm:text-3xl">{{ title }}</h1>
+                <h1 class="text-xl font-bold text-slate-900 sm:text-2xl xl:text-3xl">{{ title }}</h1>
               </div>
             </div>
 
@@ -176,7 +188,7 @@ onMounted(async () => {
           </div>
         </header>
 
-        <main class="px-4 py-6 sm:px-6 lg:h-screen lg:overflow-y-auto lg:px-8 lg:pt-[112px]">
+        <main class="px-4 py-5 sm:px-5 lg:h-screen lg:overflow-y-auto lg:px-6 lg:pt-[96px] xl:px-8 xl:pt-[104px]">
           <slot></slot>
         </main>
       </div>

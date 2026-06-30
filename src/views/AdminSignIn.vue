@@ -8,16 +8,17 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchJson, postJson } from '../lib/api'
-import { hexToRgba, resolveBrandingColors } from '../lib/branding'
+import { getCachedSiteBranding, hexToRgba, resolveBrandingColors, syncSiteBrandingCache } from '../lib/branding'
 import { isWebNfcSupported, scanSingleNfcBadge } from '../lib/nfc'
 
 const router = useRouter()
 const DEV_LOGIN_BADGE = '15357920'
 const DEV_LOGIN_PASSWORD = '21322455'
-const homeSiteLogo = ref('')
-const homeSiteName = ref('')
-const homeSiteTagline = ref('')
-const brandingColors = ref(resolveBrandingColors())
+const cachedBranding = getCachedSiteBranding()
+const homeSiteLogo = ref(cachedBranding.siteLogo)
+const homeSiteName = ref(cachedBranding.siteName)
+const homeSiteTagline = ref(cachedBranding.siteTagline)
+const brandingColors = ref(resolveBrandingColors(cachedBranding.brandingColors))
 
 const password = ref('')
 const badgeCode = ref('')
@@ -178,10 +179,11 @@ const clearMessages = () => {
 const loadBranding = async () => {
   try {
     const response = await fetchJson('/api/public/branding')
-    homeSiteLogo.value = response.siteLogo || ''
-    homeSiteName.value = response.siteName || ''
-    homeSiteTagline.value = response.siteTagline || ''
-    brandingColors.value = resolveBrandingColors(response.brandingColors || {})
+    const normalizedBranding = syncSiteBrandingCache(response)
+    homeSiteLogo.value = normalizedBranding.siteLogo
+    homeSiteName.value = normalizedBranding.siteName
+    homeSiteTagline.value = normalizedBranding.siteTagline
+    brandingColors.value = resolveBrandingColors(normalizedBranding.brandingColors)
   } catch {
     // Keep the current palette if branding cannot be loaded.
   }
@@ -718,9 +720,10 @@ onBeforeUnmount(() => {
 }
 
 .login-brand-logo {
-  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
-  color: #ffffff;
-  box-shadow: 0 18px 42px var(--brand-primary-soft);
+  background: #ffffff;
+  color: var(--brand-primary);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(226, 232, 240, 0.95);
 }
 
 .login-brand-surface {
