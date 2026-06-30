@@ -943,7 +943,7 @@ const deleteRoster = async (roster) => {
     </section>
 
     <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-4">
-      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <div class="flex max-h-[calc(100vh-4.5rem)] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         <div class="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5">
           <div>
             <p class="text-xl font-semibold text-slate-900">{{ editingRosterId ? 'Edit Roster' : 'Create Roster' }}</p>
@@ -1060,7 +1060,7 @@ const deleteRoster = async (roster) => {
                 </div>
               </div>
 
-              <div class="max-h-[480px] overflow-y-auto px-5 py-4">
+              <div class="max-h-[420px] overflow-y-auto px-5 py-4">
                 <div class="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
                   Shared stations are managed from `Add Stations`. Choosing an occupied one-person station will open a swap dialog.
                 </div>
@@ -1087,9 +1087,7 @@ const deleteRoster = async (roster) => {
                         </div>
                         <div class="min-w-0">
                           <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
-                          <p class="mt-1 text-xs text-slate-400">
-                            {{ employee.badgeId }} | {{ getBadgeUsernameLabel(employee.badgeUsername) }} | {{ employee.departmentName }} / {{ employee.roleName }}
-                          </p>
+                          <p class="mt-1 text-xs text-slate-400">{{ employee.badgeId }} | {{ getBadgeUsernameLabel(employee.badgeUsername) }}</p>
                         </div>
                       </div>
                       <button
@@ -1143,7 +1141,7 @@ const deleteRoster = async (roster) => {
       v-if="showAssignmentEditorModal && activeAssignmentEmployee && activeAssignment"
       class="fixed inset-0 z-[58] flex items-center justify-center bg-slate-950/50 px-4 py-4"
     >
-      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <div class="flex max-h-[calc(100vh-4.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
             <p class="text-xl font-semibold text-slate-900">Edit Associate Assignment</p>

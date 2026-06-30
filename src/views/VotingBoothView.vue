@@ -81,12 +81,12 @@ const brandingVars = computed(() => {
   }
 })
 
-const buildScannerConstraints = () => {
+const buildScannerConstraints = (mode = 'vote') => {
   const baseConstraints = {
-    width: { ideal: 1920, min: 640 },
-    height: { ideal: 1080, min: 480 },
+    width: { ideal: mode === 'roster' ? 2560 : 1920, min: 640 },
+    height: { ideal: mode === 'roster' ? 1440 : 1080, min: 480 },
     aspectRatio: { ideal: 1.7777777778 },
-    frameRate: { ideal: 60, min: 24 },
+    frameRate: { ideal: mode === 'roster' ? 90 : 60, min: 24 },
   }
 
   return selectedCameraId.value
@@ -675,7 +675,9 @@ const prepareBadgeForVote = async (source = 'manual') => {
 const readBadgeWithNfc = async () => {
   clearMessages()
 
-  if (!pendingVoteCard.value) {
+  if (isRosterScannerMode.value) {
+    clearRosterLookupFeedback()
+  } else if (!pendingVoteCard.value) {
     setError('Select a nominee card first.')
     return
   }
@@ -696,9 +698,18 @@ const readBadgeWithNfc = async () => {
       },
     })
 
-    badgeId.value = scannedBadgeId
     scannerMessage.value = `NFC badge detected: ${scannedBadgeId}`
     await playScanBeep()
+
+    if (isRosterScannerMode.value) {
+      rosterBadgeId.value = scannedBadgeId
+      closeCameraModal()
+      scannerContext.value = 'vote'
+      await checkRosterAssignment('nfc', scannedBadgeId)
+      return
+    }
+
+    badgeId.value = scannedBadgeId
     await prepareBadgeForVote('nfc')
   } catch (error) {
     if (error?.name !== 'AbortError') {
@@ -772,7 +783,7 @@ const handleScannedCode = async (scannedValue) => {
   }
 }
 
-const startScanner = async (constraints) => {
+const startScanner = async (constraints, mode = 'vote') => {
   const hints = new Map()
   hints.set(DecodeHintType.POSSIBLE_FORMATS, scannerFormats)
   hints.set(DecodeHintType.TRY_HARDER, true)
@@ -788,9 +799,9 @@ const startScanner = async (constraints) => {
     throw new Error('Scanner preview is not ready yet.')
   }
 
-  scannerReader = new BrowserMultiFormatReader(hints, 80)
-  scannerReader.timeBetweenDecodingAttempts = 30
-  scannerReader.timeBetweenScansMillis = 30
+  scannerReader = new BrowserMultiFormatReader(hints, mode === 'roster' ? 60 : 80)
+  scannerReader.timeBetweenDecodingAttempts = mode === 'roster' ? 18 : 30
+  scannerReader.timeBetweenScansMillis = mode === 'roster' ? 18 : 30
 
   await scannerReader.decodeFromConstraints(
     {
@@ -841,7 +852,7 @@ const openCamera = async (mode = 'vote') => {
       selectedCameraId.value = getPreferredCameraId()
     }
 
-    await startScanner(buildScannerConstraints())
+    await startScanner(buildScannerConstraints(mode), mode)
     await optimizeScannerTrack()
     scannerTuneInterval = window.setInterval(() => {
       optimizeScannerTrack()
@@ -862,6 +873,7 @@ const openCamera = async (mode = 'vote') => {
 
 const switchCamera = async () => {
   clearMessages()
+  const nextMode = scannerContext.value
 
   if (availableCameras.value.length > 1) {
     const currentIndex = availableCameras.value.findIndex(
@@ -874,7 +886,7 @@ const switchCamera = async () => {
     selectedCameraId.value = ''
   }
 
-  await openCamera()
+  await openCamera(nextMode)
 }
 
 const startVoteFlow = async (card) => {
@@ -1565,7 +1577,7 @@ onBeforeUnmount(() => {
               autoplay
               playsinline
               muted
-              class="h-40 w-full object-cover sm:h-48"
+              class="h-44 w-full object-cover sm:h-56"
             ></video>
 
             <div
@@ -1592,29 +1604,42 @@ onBeforeUnmount(() => {
             <div class="flex min-w-0 flex-1 items-center px-4 py-4">
               <span class="material-symbols-outlined text-xl text-slate-400">badge</span>
               <input
-                v-model="badgeId"
+                :value="isRosterScannerMode ? rosterBadgeId : badgeId"
                 type="text"
                 inputmode="numeric"
-                placeholder="Associate Badge ID"
+                :placeholder="isRosterScannerMode ? 'Badge ID or Badge User Name' : 'Associate Badge ID'"
                 class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
+                @input="
+                  isRosterScannerMode
+                    ? (rosterBadgeId = $event.target.value)
+                    : (badgeId = $event.target.value)
+                "
               />
             </div>
             <button
               v-if="canUseNfc"
               type="button"
               @click="readBadgeWithNfc"
-              :disabled="isPreparingVote || isSubmitting"
+              :disabled="isRosterScannerMode ? isCheckingRoster : isPreparingVote || isSubmitting"
               class="public-brand-outline inline-flex h-[58px] shrink-0 items-center justify-center border-l border-slate-200 bg-white px-4 text-slate-700 transition disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span class="material-symbols-outlined text-lg">{{ isNfcScanning ? 'close' : 'nfc' }}</span>
             </button>
             <button
               type="button"
-              @click="prepareBadgeForVote"
-              :disabled="isPreparingVote || isSubmitting"
+              @click="isRosterScannerMode ? checkRosterAssignment() : prepareBadgeForVote()"
+              :disabled="isRosterScannerMode ? isCheckingRoster : isPreparingVote || isSubmitting"
               class="public-brand-action inline-flex h-[58px] shrink-0 items-center justify-center px-5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {{ isPreparingVote ? 'Checking...' : 'Check' }}
+              {{
+                isRosterScannerMode
+                  ? isCheckingRoster
+                    ? 'Checking...'
+                    : 'Check'
+                  : isPreparingVote
+                    ? 'Checking...'
+                    : 'Check'
+              }}
             </button>
           </div>
 
