@@ -35,6 +35,7 @@ const showCreateModal = ref(false)
 const showStationsModal = ref(false)
 const showStationListModal = ref(false)
 const showAssignmentPromptModal = ref(false)
+const showSectionSummaryModal = ref(false)
 const showSwapModal = ref(false)
 const editingRosterId = ref(null)
 const submitError = ref('')
@@ -74,6 +75,12 @@ const assignmentPromptState = reactive({
   description: '',
   options: [],
 })
+const sectionSummaryModalState = reactive({
+  sectionKey: '',
+  title: '',
+  associates: [],
+  assignedStations: 0,
+})
 
 const filteredRosters = computed(() =>
   rosters.value.filter((roster) => {
@@ -85,7 +92,7 @@ const filteredRosters = computed(() =>
 const filteredEmployeeOptions = computed(() =>
   employeeOptions.value.filter((employee) => {
     const haystack =
-      `${employee.badgeId} ${employee.fullName} ${employee.departmentName} ${employee.roleName}`.toLowerCase()
+      `${employee.badgeId} ${employee.badgeUsername || ''} ${employee.fullName} ${employee.departmentName} ${employee.roleName}`.toLowerCase()
     return !employeeSearch.value || haystack.includes(employeeSearch.value.toLowerCase())
   }),
 )
@@ -135,6 +142,8 @@ const sectionSummary = computed(() =>
         return {
           ...employee,
           station,
+          detailKey: assignment.detailKey || '',
+          floorCode: assignment.floorCode || '',
         }
       })
       .filter(Boolean)
@@ -290,12 +299,6 @@ const getAssignmentDetailButtonLabel = (employeeId) => {
     )
   }
 
-  if (isQuantityStowSection(assignment.sectionKey)) {
-    return assignment.stationId
-      ? stationLookup.value[assignment.stationId]?.displayLabel || 'Change quantity station'
-      : 'Choose quantity station'
-  }
-
   return 'No prompt required'
 }
 const getAssignmentSummaryText = (employeeId) => {
@@ -322,6 +325,8 @@ const getAssignmentSummaryText = (employeeId) => {
 
   return 'No extra assignment yet.'
 }
+const getSectionDetailLabel = (sectionKey, detailKey) =>
+  getSectionDetailOptions(sectionKey).find((option) => option.key === detailKey)?.label || detailKey || ''
 
 const shuffleItems = (items) => {
   const cloned = [...items]
@@ -456,6 +461,22 @@ const closeStationListModal = () => {
   stationListModalState.stations = []
 }
 
+const closeSectionSummaryModal = () => {
+  showSectionSummaryModal.value = false
+  sectionSummaryModalState.sectionKey = ''
+  sectionSummaryModalState.title = ''
+  sectionSummaryModalState.associates = []
+  sectionSummaryModalState.assignedStations = 0
+}
+
+const openSectionSummaryModal = (section) => {
+  sectionSummaryModalState.sectionKey = section.key
+  sectionSummaryModalState.title = section.label
+  sectionSummaryModalState.associates = section.associates || []
+  sectionSummaryModalState.assignedStations = section.assignedStations || 0
+  showSectionSummaryModal.value = true
+}
+
 const openStationListModal = ({ title, description, accentClass, emptyMessage, stations: entries }) => {
   stationListModalState.title = title
   stationListModalState.description = description
@@ -496,17 +517,6 @@ const openAssignmentPromptModal = (employeeId, requestedSectionKey = '') => {
     showAssignmentPromptModal.value = true
     return
   }
-
-  if (isQuantityStowSection(sectionKey)) {
-    assignmentPromptState.employeeId = employeeId
-    assignmentPromptState.sectionKey = sectionKey
-    assignmentPromptState.mode = 'station'
-    assignmentPromptState.title = 'Choose Quantity Station'
-    assignmentPromptState.description =
-      'Select a Quantity Stow station from the associate floor. Occupied stations can be swapped in one click.'
-    assignmentPromptState.options = getAllowedStationsForEmployee(employeeId)
-    showAssignmentPromptModal.value = true
-  }
 }
 
 const updateAssignment = (employeeId, nextAssignment) => {
@@ -544,9 +554,6 @@ const setEmployeeFloor = (employeeId, floorCode) => {
     openAssignmentPromptModal(employeeId, updatedAssignment.sectionKey)
   }
 
-  if (isQuantityStowSection(updatedAssignment.sectionKey) && !updatedAssignment.stationId) {
-    openAssignmentPromptModal(employeeId, updatedAssignment.sectionKey)
-  }
 }
 
 const setEmployeeSection = (employeeId, sectionKey) => {
@@ -566,7 +573,7 @@ const setEmployeeSection = (employeeId, sectionKey) => {
     detailKey: currentAssignment?.detailKey || '',
   })
 
-  if (requiresDetailSelection(normalizedSectionKey) || isQuantityStowSection(normalizedSectionKey)) {
+  if (requiresDetailSelection(normalizedSectionKey)) {
     openAssignmentPromptModal(employeeId, normalizedSectionKey)
   }
 }
@@ -619,12 +626,6 @@ const requestStationAssignment = (employeeId, rawStationId) => {
   }
 
   assignStationToEmployee(employeeId, stationId)
-}
-
-const selectQuantityStation = (stationId) => {
-  const employeeId = assignmentPromptState.employeeId
-  closeAssignmentPromptModal()
-  requestStationAssignment(employeeId, stationId)
 }
 
 const closeSwapModal = () => {
@@ -1010,32 +1011,16 @@ const deleteRoster = async (roster) => {
                   >
                     <div class="flex items-center justify-between gap-3">
                       <p class="font-semibold text-slate-800">{{ section.label }}</p>
-                      <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                      <button
+                        type="button"
+                        @click="openSectionSummaryModal(section)"
+                        class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 transition hover:bg-slate-200"
+                      >
                         {{ section.associates.length }} associates | {{ section.assignedStations }} stations
-                      </span>
+                      </button>
                     </div>
-                    <div class="mt-3 flex flex-wrap gap-2">
-                      <span
-                        v-for="associate in section.associates.slice(0, 5)"
-                        :key="`${section.key}-${associate.id}`"
-                        class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-600"
-                      >
-                        {{ associate.fullName }}
-                      </span>
-                      <span
-                        v-for="associate in section.associates.slice(0, 5).filter((entry) => entry.station)"
-                        :key="`${section.key}-${associate.id}-station`"
-                        class="rounded-full bg-violet-50 px-3 py-1 text-xs text-violet-600"
-                      >
-                        {{ associate.station.displayLabel }}
-                      </span>
-                      <span
-                        v-if="section.associates.length > 5"
-                        class="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-600"
-                      >
-                        +{{ section.associates.length - 5 }} more
-                      </span>
-                      <p v-if="!section.associates.length" class="text-xs text-slate-400">No associates assigned yet.</p>
+                    <div class="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
+                      Click the count chip to review all associates and station details in a separate popup.
                     </div>
                   </div>
                 </div>
@@ -1053,7 +1038,7 @@ const deleteRoster = async (roster) => {
                     <input
                       v-model="employeeSearch"
                       type="text"
-                      placeholder="Search associates..."
+                      placeholder="Search by full name, badge ID, or badge username"
                       class="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none"
                     />
                   </div>
@@ -1086,13 +1071,13 @@ const deleteRoster = async (roster) => {
                     <div class="min-w-0">
                       <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
                       <p class="mt-1 text-xs text-slate-400">
-                        {{ employee.badgeId }} | {{ employee.departmentName }} / {{ employee.roleName }}
+                        {{ employee.badgeId }}<span v-if="employee.badgeUsername"> | {{ employee.badgeUsername }}</span> | {{ employee.departmentName }} / {{ employee.roleName }}
                       </p>
                     </div>
                   </div>
 
                   <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <label class="block">
+                    <label class="block min-w-0">
                       <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                         Floor
                       </span>
@@ -1105,7 +1090,7 @@ const deleteRoster = async (roster) => {
                       </select>
                     </label>
 
-                    <label class="block">
+                    <label class="block min-w-0">
                       <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                         Section
                       </span>
@@ -1121,40 +1106,35 @@ const deleteRoster = async (roster) => {
                       </select>
                     </label>
 
-                    <div class="block">
+                    <div class="block min-w-0">
                       <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                         Role / Task
                       </span>
                       <button
-                        v-if="requiresDetailSelection(assignmentLookup[employee.id]?.sectionKey) || isQuantityStowSection(assignmentLookup[employee.id]?.sectionKey)"
+                        v-if="requiresDetailSelection(assignmentLookup[employee.id]?.sectionKey)"
                         type="button"
                         @click="openAssignmentPromptModal(employee.id)"
-                        class="flex h-10 w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 text-left text-sm text-slate-700"
+                        class="flex h-10 w-full min-w-0 items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 text-left text-sm text-slate-700"
                       >
-                        <span class="truncate">{{ getAssignmentDetailButtonLabel(employee.id) }}</span>
+                        <span class="min-w-0 truncate">{{ getAssignmentDetailButtonLabel(employee.id) }}</span>
                         <span class="material-symbols-outlined text-base text-slate-400">open_in_new</span>
                       </button>
                       <div
                         v-else
-                        class="flex h-10 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
+                        class="flex h-10 min-w-0 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
                       >
                         No extra role prompt
                       </div>
                     </div>
 
-                    <div class="block">
+                    <div class="block min-w-0">
                       <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                         Station
                       </span>
-                      <template
-                        v-if="
-                          supportsStationAssignment(assignmentLookup[employee.id]?.sectionKey) &&
-                          !isQuantityStowSection(assignmentLookup[employee.id]?.sectionKey)
-                        "
-                      >
+                      <template v-if="supportsStationAssignment(assignmentLookup[employee.id]?.sectionKey)">
                         <select
                           :value="assignmentLookup[employee.id]?.stationId || ''"
-                          class="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                          class="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
                           @change="requestStationAssignment(employee.id, $event.target.value)"
                         >
                           <option value="">No station assigned</option>
@@ -1169,13 +1149,9 @@ const deleteRoster = async (roster) => {
                       </template>
                       <div
                         v-else
-                        class="flex h-10 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
+                        class="flex h-10 min-w-0 items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
                       >
-                        {{
-                          supportsStationAssignment(assignmentLookup[employee.id]?.sectionKey)
-                            ? 'Use the role/task button to choose the quantity station.'
-                            : 'No station for this section'
-                        }}
+                        No station for this section
                       </div>
                     </div>
                   </div>
@@ -1249,23 +1225,76 @@ const deleteRoster = async (roster) => {
             </button>
           </div>
 
-          <div v-else-if="assignmentPromptState.mode === 'station'" class="grid gap-3 sm:grid-cols-2">
-            <button
-              v-for="station in assignmentPromptState.options"
-              :key="station.id"
-              type="button"
-              @click="selectQuantityStation(station.id)"
-              class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left text-sm text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
-            >
-              <p class="font-semibold text-slate-900">{{ station.displayLabel }}</p>
-              <p class="mt-1 text-xs text-slate-500">Choose this quantity station for the selected associate.</p>
-            </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showSectionSummaryModal"
+      class="fixed inset-0 z-[59] flex items-center justify-center bg-slate-950/50 px-4 py-4"
+    >
+      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">{{ sectionSummaryModalState.title }}</p>
+            <p class="mt-1 text-sm text-slate-500">
+              {{ sectionSummaryModalState.associates.length }} associates | {{ sectionSummaryModalState.assignedStations }} stations
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="closeSectionSummaryModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div v-if="sectionSummaryModalState.associates.length" class="grid gap-3">
             <div
-              v-if="!assignmentPromptState.options.length"
-              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 sm:col-span-2"
+              v-for="associate in sectionSummaryModalState.associates"
+              :key="associate.id"
+              class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
             >
-              No Quantity Stow stations are available on the selected floor yet.
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-semibold text-slate-900">{{ associate.fullName }}</p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ associate.badgeId }}<span v-if="associate.badgeUsername"> | {{ associate.badgeUsername }}</span>
+                  </p>
+                </div>
+                <span class="rounded-full bg-white px-3 py-1 text-xs text-slate-600">
+                  {{ associate.floorCode || 'No floor' }}
+                </span>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <span
+                  v-if="associate.detailKey"
+                  class="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-600"
+                >
+                  {{ getSectionDetailLabel(sectionSummaryModalState.sectionKey, associate.detailKey) }}
+                </span>
+                <span
+                  v-if="associate.station"
+                  class="rounded-full bg-violet-50 px-3 py-1 text-xs text-violet-600"
+                >
+                  {{ associate.station.displayLabel }}
+                </span>
+                <span
+                  v-if="!associate.detailKey && !associate.station"
+                  class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500"
+                >
+                  No extra details
+                </span>
+              </div>
             </div>
+          </div>
+          <div
+            v-else
+            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500"
+          >
+            No associates assigned yet.
           </div>
         </div>
       </div>

@@ -2221,7 +2221,7 @@ app.get('/api/voting-rounds', async (_req, res) => {
     )
     const employeeOptions = await query(
       `
-        SELECT id, badge_id, full_name, department_name, role_name, employment_status, photo_data
+        SELECT id, badge_id, badge_username, full_name, department_name, role_name, employment_status, photo_data
         FROM employees
         WHERE employment_status = 'ACTIVE'
         ORDER BY full_name ASC
@@ -3634,6 +3634,7 @@ app.get('/api/rosters', async (_req, res) => {
       employeeOptions: employeeOptions.map((employee) => ({
         id: employee.id,
         badgeId: employee.badge_id,
+        badgeUsername: employee.badge_username || '',
         fullName: employee.full_name,
         departmentName: employee.department_name,
         roleName: employee.role_name,
