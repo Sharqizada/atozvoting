@@ -200,7 +200,10 @@ const farAwayAssignedItems = computed(() =>
 )
 const unassignedStationItems = computed(() =>
   createForm.assignments
-    .filter((assignment) => !Number(assignment.stationId))
+    .filter(
+      (assignment) =>
+        supportsStationAssignment(assignment.sectionKey) && !Number(assignment.stationId),
+    )
     .map((assignment) => {
       const employee = employeeLookup.value[assignment.employeeId]
 
@@ -217,6 +220,7 @@ const unassignedStationItems = computed(() =>
     })
     .filter(Boolean),
 )
+const unassignedStationCount = computed(() => unassignedStationItems.value.length)
 
 const paginationLabel = computed(
   () => `Showing 1 to ${filteredRosters.value.length} of ${rosters.value.length} rosters`,
@@ -1013,7 +1017,7 @@ const deleteRoster = async (roster) => {
                     class="rounded-2xl border border-white bg-white px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
                   >
                     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Unassigned</p>
-                    <p class="mt-2 text-2xl font-semibold text-slate-900">{{ assignedCount - assignedStationCount }}</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-900">{{ unassignedStationCount }}</p>
                   </button>
                 </div>
 
@@ -1024,17 +1028,14 @@ const deleteRoster = async (roster) => {
                     class="rounded-2xl border border-white bg-white px-4 py-3"
                   >
                     <div class="flex items-center justify-between gap-3">
-                      <p class="font-semibold text-slate-800">{{ section.label }}</p>
+                      <p class="min-w-0 text-xs font-semibold text-slate-700 sm:text-sm">{{ section.label }}</p>
                       <button
                         type="button"
                         @click="openSectionSummaryModal(section)"
-                        class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 transition hover:bg-slate-200"
+                        class="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-[11px] text-slate-600 transition hover:bg-slate-200 sm:text-xs"
                       >
                         {{ section.associates.length }} associates | {{ section.assignedStations }} stations
                       </button>
-                    </div>
-                    <div class="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-                      Click the count chip to review all associates and station details in a separate popup.
                     </div>
                   </div>
                 </div>
