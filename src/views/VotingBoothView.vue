@@ -1460,7 +1460,7 @@ onBeforeUnmount(() => {
 
     <div
       v-if="isCameraModalOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/75 px-4 py-6 backdrop-blur-sm"
     >
       <div class="w-full max-w-lg rounded-[28px] bg-white p-4 shadow-2xl sm:p-5">
         <div class="flex items-start justify-between gap-4">
