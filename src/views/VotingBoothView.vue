@@ -23,6 +23,11 @@ const publicCategories = ref([])
 const pendingVoteCard = ref(null)
 const verifiedVoter = ref(null)
 const badgeId = ref('')
+const isRosterLookupModalOpen = ref(false)
+const rosterBadgeId = ref('')
+const rosterBadgeUsername = ref('')
+const rosterLookupError = ref('')
+const rosterLookupResult = ref(null)
 const errorMessage = ref('')
 const successMessage = ref('')
 const toast = ref({
@@ -40,9 +45,11 @@ const isMobileTipsModalOpen = ref(false)
 const isCameraOpen = ref(false)
 const isCameraLoading = ref(false)
 const isNfcScanning = ref(false)
+const isCheckingRoster = ref(false)
 const cameraMode = ref('environment')
 const availableCameras = ref([])
 const selectedCameraId = ref('')
+const scannerContext = ref('vote')
 const scannerMessage = ref('Starting camera...')
 const videoRef = ref(null)
 const nowTick = ref(Date.now())
@@ -218,8 +225,12 @@ const rosterStationCount = computed(() =>
   ),
 )
 const showConfirmVoteStep = computed(
-  () => isCameraModalOpen.value && Boolean(pendingVoteCard.value && verifiedVoter.value),
+  () =>
+    scannerContext.value === 'vote' &&
+    isCameraModalOpen.value &&
+    Boolean(pendingVoteCard.value && verifiedVoter.value),
 )
+const isRosterScannerMode = computed(() => scannerContext.value === 'roster')
 const padTwoDigits = (value) => {
   const normalized = String(value)
   return normalized.length >= 2 ? normalized : `0${normalized}`
@@ -441,6 +452,11 @@ const resetPendingVote = () => {
   badgeId.value = ''
 }
 
+const clearRosterLookupFeedback = () => {
+  rosterLookupError.value = ''
+  rosterLookupResult.value = null
+}
+
 const loadPublicVotingPage = async () => {
   isLoadingRound.value = true
   clearMessages()
@@ -481,6 +497,25 @@ const loadPublicVotingPage = async () => {
 const navigateToLogin = () => {
   isMobileMenuOpen.value = false
   router.push('/login')
+}
+
+const openRosterLookupModal = () => {
+  isMobileMenuOpen.value = false
+  clearMessages()
+  clearRosterLookupFeedback()
+  isRosterLookupModalOpen.value = true
+}
+
+const closeRosterLookupModal = () => {
+  if (isRosterScannerMode.value) {
+    closeCameraModal()
+    scannerContext.value = 'vote'
+  }
+
+  isRosterLookupModalOpen.value = false
+  rosterBadgeId.value = ''
+  rosterBadgeUsername.value = ''
+  clearRosterLookupFeedback()
 }
 
 const refreshCameraList = async () => {
@@ -580,6 +615,17 @@ const closeCameraModal = () => {
 const cancelVoteFlow = () => {
   closeCameraModal()
   resetPendingVote()
+  scannerContext.value = 'vote'
+}
+
+const closeActiveScannerModal = () => {
+  if (isRosterScannerMode.value) {
+    closeCameraModal()
+    scannerContext.value = 'vote'
+    return
+  }
+
+  cancelVoteFlow()
 }
 
 const prepareBadgeForVote = async (source = 'manual') => {
@@ -667,6 +713,38 @@ const readBadgeWithNfc = async () => {
   }
 }
 
+const checkRosterAssignment = async (source = 'manual', scannedBadgeId = '') => {
+  clearRosterLookupFeedback()
+
+  const lookupBadgeId = `${scannedBadgeId || rosterBadgeId.value || ''}`.trim()
+  const lookupBadgeUsername = `${rosterBadgeUsername.value || ''}`.trim()
+
+  if (!lookupBadgeId && !lookupBadgeUsername) {
+    rosterLookupError.value = 'Enter Badge User Name, Badge ID, or scan the badge first.'
+    return
+  }
+
+  rosterBadgeId.value = lookupBadgeId
+  isCheckingRoster.value = true
+
+  try {
+    const data = await postJson('/api/public/roster-check', {
+      badgeId: lookupBadgeId,
+      badgeUsername: lookupBadgeUsername,
+    })
+
+    rosterLookupResult.value = {
+      ...data,
+      source,
+    }
+  } catch (error) {
+    rosterLookupResult.value = null
+    rosterLookupError.value = error.message || 'Unable to check the roster right now.'
+  } finally {
+    isCheckingRoster.value = false
+  }
+}
+
 const handleScannedCode = async (scannedValue) => {
   const normalizedValue = scannedValue?.trim()
   const now = Date.now()
@@ -677,10 +755,19 @@ const handleScannedCode = async (scannedValue) => {
 
   lastDetectedBadge = normalizedValue
   lastDetectedAt = now
-  badgeId.value = normalizedValue
   scannerMessage.value = `Badge detected: ${normalizedValue}`
 
   await playScanBeep()
+
+  if (isRosterScannerMode.value) {
+    rosterBadgeId.value = normalizedValue
+    closeCameraModal()
+    scannerContext.value = 'vote'
+    await checkRosterAssignment('barcode', normalizedValue)
+    return
+  }
+
+  badgeId.value = normalizedValue
   const isReady = await prepareBadgeForVote('barcode')
 
   if (isReady) {
@@ -731,8 +818,12 @@ const startScanner = async (constraints) => {
   )
 }
 
-const openCamera = async () => {
+const openCamera = async (mode = 'vote') => {
+  scannerContext.value = mode
   clearMessages()
+  if (mode === 'roster') {
+    clearRosterLookupFeedback()
+  }
   isCameraModalOpen.value = true
   await nextTick()
 
@@ -742,7 +833,7 @@ const openCamera = async () => {
   }
 
   isCameraLoading.value = true
-  scannerMessage.value = 'Starting camera...'
+  scannerMessage.value = mode === 'roster' ? 'Starting roster scanner...' : 'Starting camera...'
 
   try {
     stopCamera()
@@ -759,7 +850,10 @@ const openCamera = async () => {
     }, 900)
     await refreshCameraList()
     isCameraOpen.value = true
-    scannerMessage.value = 'Camera is ready. Move the badge across the scanner line. Detection is now optimized for faster reads.'
+    scannerMessage.value =
+      mode === 'roster'
+        ? 'Camera is ready. Move the badge across the scanner line to check your roster assignment.'
+        : 'Camera is ready. Move the badge across the scanner line. Detection is now optimized for faster reads.'
   } catch (error) {
     setError(error.message || 'Unable to access the camera.')
     scannerMessage.value = 'Camera permission is required for scanning.'
@@ -993,17 +1087,35 @@ onBeforeUnmount(() => {
             <span class="material-symbols-outlined text-xl">{{ isMobileMenuOpen ? 'close' : 'menu' }}</span>
           </button>
 
-          <button
-            type="button"
-            @click="navigateToLogin"
-            class="public-brand-outline hidden h-11 items-center justify-center gap-2 rounded-xl border bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition sm:inline-flex"
-          >
-            <span class="material-symbols-outlined text-base">admin_panel_settings</span>
-            Login
-          </button>
+          <div class="hidden items-center gap-3 sm:flex">
+            <button
+              type="button"
+              @click="openRosterLookupModal"
+              class="public-brand-outline inline-flex h-11 items-center justify-center gap-2 rounded-xl border bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition"
+            >
+              <span class="material-symbols-outlined text-base">assignment_ind</span>
+              Check Roster
+            </button>
+            <button
+              type="button"
+              @click="navigateToLogin"
+              class="public-brand-outline inline-flex h-11 items-center justify-center gap-2 rounded-xl border bg-white/85 px-4 text-sm text-slate-600 shadow-sm backdrop-blur transition"
+            >
+              <span class="material-symbols-outlined text-base">admin_panel_settings</span>
+              Login
+            </button>
+          </div>
         </div>
 
         <div v-if="isMobileMenuOpen" class="mt-3 rounded-2xl border bg-white/90 p-3 shadow-sm sm:hidden public-brand-outline">
+          <button
+            type="button"
+            @click="openRosterLookupModal"
+            class="public-brand-outline mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 text-sm text-slate-600 transition"
+          >
+            <span class="material-symbols-outlined text-base">assignment_ind</span>
+            Check Roster
+          </button>
           <button
             type="button"
             @click="navigateToLogin"
@@ -1357,15 +1469,27 @@ onBeforeUnmount(() => {
         <div class="flex items-start justify-between gap-4">
           <div>
             <p class="text-lg font-semibold text-slate-900">
-              {{ showConfirmVoteStep ? 'Confirm Your Vote' : 'Scan Associate Badge' }}
+              {{
+                showConfirmVoteStep
+                  ? 'Confirm Your Vote'
+                  : isRosterScannerMode
+                    ? 'Scan Roster Badge Barcode'
+                    : 'Scan Associate Badge'
+              }}
             </p>
             <p class="mt-1 text-sm text-slate-500">
-              {{ showConfirmVoteStep ? 'Review the nominee and confirm the vote inside this modal.' : `Scanning for: ${pendingVoteCard?.fullName || 'Selected nominee'}` }}
+              {{
+                showConfirmVoteStep
+                  ? 'Review the nominee and confirm the vote inside this modal.'
+                  : isRosterScannerMode
+                    ? 'Scan the badge barcode to search the current roster assignment.'
+                    : `Scanning for: ${pendingVoteCard?.fullName || 'Selected nominee'}`
+              }}
             </p>
           </div>
           <button
             type="button"
-            @click="cancelVoteFlow"
+            @click="closeActiveScannerModal"
             class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500"
           >
             <span class="material-symbols-outlined">close</span>
@@ -1509,11 +1633,107 @@ onBeforeUnmount(() => {
 
             <button
               type="button"
-              @click="cancelVoteFlow"
+              @click="closeActiveScannerModal"
               class="public-brand-outline inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium text-slate-700 transition"
             >
               <span class="material-symbols-outlined text-lg">videocam_off</span>
               Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="isRosterLookupModalOpen"
+      class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-950/70 px-4 py-6 backdrop-blur-sm"
+    >
+      <div class="w-full max-w-lg rounded-[28px] bg-white p-5 shadow-2xl sm:p-6">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">Check Roster</p>
+            <p class="mt-1 text-sm text-slate-500">
+              Search using Badge User Name, Badge ID, or scan the badge barcode.
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="closeRosterLookupModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div class="mt-5 space-y-4">
+          <label class="flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <span class="material-symbols-outlined public-brand-accent text-xl">person_search</span>
+            <input
+              v-model="rosterBadgeUsername"
+              type="text"
+              placeholder="Badge User Name"
+              class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
+            />
+          </label>
+
+          <div class="flex overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div class="flex min-w-0 flex-1 items-center px-4 py-4">
+              <span class="material-symbols-outlined public-brand-accent text-xl">badge</span>
+              <input
+                v-model="rosterBadgeId"
+                type="text"
+                placeholder="Badge ID"
+                class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
+              />
+            </div>
+            <button
+              type="button"
+              @click="openCamera('roster')"
+              :disabled="isCameraLoading || isCheckingRoster"
+              class="public-brand-action inline-flex h-[58px] w-16 shrink-0 items-center justify-center text-white transition disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <span class="material-symbols-outlined text-lg">barcode_scanner</span>
+            </button>
+          </div>
+
+          <div
+            v-if="rosterLookupError"
+            class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+          >
+            {{ rosterLookupError }}
+          </div>
+
+          <div
+            v-if="rosterLookupResult"
+            class="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4"
+          >
+            <p class="text-sm text-slate-500">
+              {{ rosterLookupResult.associate?.fullName || 'Associate' }}
+              <span v-if="rosterLookupResult.rosterName"> | {{ rosterLookupResult.rosterName }}</span>
+            </p>
+            <p class="mt-3 text-2xl font-semibold text-slate-900">
+              {{ rosterLookupResult.assignmentLabel }}
+            </p>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              @click="closeRosterLookupModal"
+              class="public-brand-outline inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium text-slate-700 transition"
+            >
+              <span class="material-symbols-outlined text-lg">close</span>
+              Close
+            </button>
+
+            <button
+              type="button"
+              @click="checkRosterAssignment"
+              :disabled="isCheckingRoster"
+              class="public-brand-action inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <span class="material-symbols-outlined text-lg">search</span>
+              {{ isCheckingRoster ? 'Checking...' : 'Check Assignment' }}
             </button>
           </div>
         </div>
