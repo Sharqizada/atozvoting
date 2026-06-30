@@ -25,7 +25,6 @@ const verifiedVoter = ref(null)
 const badgeId = ref('')
 const isRosterLookupModalOpen = ref(false)
 const rosterBadgeId = ref('')
-const rosterBadgeUsername = ref('')
 const rosterLookupError = ref('')
 const rosterLookupResult = ref(null)
 const errorMessage = ref('')
@@ -514,7 +513,6 @@ const closeRosterLookupModal = () => {
 
   isRosterLookupModalOpen.value = false
   rosterBadgeId.value = ''
-  rosterBadgeUsername.value = ''
   clearRosterLookupFeedback()
 }
 
@@ -716,21 +714,20 @@ const readBadgeWithNfc = async () => {
 const checkRosterAssignment = async (source = 'manual', scannedBadgeId = '') => {
   clearRosterLookupFeedback()
 
-  const lookupBadgeId = `${scannedBadgeId || rosterBadgeId.value || ''}`.trim()
-  const lookupBadgeUsername = `${rosterBadgeUsername.value || ''}`.trim()
+  const lookupValue = `${scannedBadgeId || rosterBadgeId.value || ''}`.trim()
 
-  if (!lookupBadgeId && !lookupBadgeUsername) {
-    rosterLookupError.value = 'Enter Badge User Name, Badge ID, or scan the badge first.'
+  if (!lookupValue) {
+    rosterLookupError.value = 'Enter Badge ID or Badge User Name, or scan the badge first.'
     return
   }
 
-  rosterBadgeId.value = lookupBadgeId
+  rosterBadgeId.value = lookupValue
   isCheckingRoster.value = true
 
   try {
     const data = await postJson('/api/public/roster-check', {
-      badgeId: lookupBadgeId,
-      badgeUsername: lookupBadgeUsername,
+      badgeId: lookupValue,
+      badgeUsername: lookupValue,
     })
 
     rosterLookupResult.value = {
@@ -1666,23 +1663,13 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="mt-5 space-y-4">
-          <label class="flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-4">
-            <span class="material-symbols-outlined public-brand-accent text-xl">person_search</span>
-            <input
-              v-model="rosterBadgeUsername"
-              type="text"
-              placeholder="Badge User Name"
-              class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
-            />
-          </label>
-
           <div class="flex overflow-hidden rounded-2xl border border-slate-200 bg-white">
             <div class="flex min-w-0 flex-1 items-center px-4 py-4">
-              <span class="material-symbols-outlined public-brand-accent text-xl">badge</span>
+              <span class="material-symbols-outlined public-brand-accent text-xl">person_search</span>
               <input
                 v-model="rosterBadgeId"
                 type="text"
-                placeholder="Badge ID"
+                placeholder="Badge ID or Badge User Name"
                 class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
               />
             </div>
