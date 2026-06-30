@@ -32,10 +32,17 @@ const isCameraModalOpen = ref(false)
 const isCameraOpen = ref(false)
 const isCameraLoading = ref(false)
 const isNfcScanning = ref(false)
+const isRosterModalOpen = ref(false)
+const isCheckingRoster = ref(false)
 const cameraMode = ref('environment')
 const availableCameras = ref([])
 const selectedCameraId = ref('')
 const videoRef = ref(null)
+const scannerTarget = ref('login')
+const rosterBadgeId = ref('')
+const rosterBadgeUsername = ref('')
+const rosterLookupError = ref('')
+const rosterLookupResult = ref(null)
 
 let scannerReader = null
 let lastDetectedBadge = ''
@@ -175,6 +182,11 @@ const clearMessages = () => {
   successMessage.value = ''
 }
 
+const clearRosterLookupState = () => {
+  rosterLookupError.value = ''
+  rosterLookupResult.value = null
+}
+
 const loadBranding = async () => {
   try {
     const response = await fetchJson('/api/public/branding')
@@ -227,6 +239,16 @@ const stopCamera = () => {
 const closeCameraModal = () => {
   stopCamera()
   isCameraModalOpen.value = false
+}
+
+const openRosterModal = () => {
+  clearRosterLookupState()
+  isRosterModalOpen.value = true
+}
+
+const closeRosterModal = () => {
+  stopCamera()
+  isRosterModalOpen.value = false
 }
 
 const stopNfcScan = () => {
@@ -303,9 +325,18 @@ const handleScannedCode = async (scannedValue) => {
 
   lastDetectedBadge = normalizedValue
   lastDetectedAt = now
-  badgeCode.value = normalizedValue
   scannerMessage.value = `Badge detected: ${normalizedValue}`
 
+  if (scannerTarget.value === 'roster') {
+    rosterBadgeId.value = normalizedValue
+    clearRosterLookupState()
+    await playScanBeep()
+    closeCameraModal()
+    await checkRosterAssignment('barcode')
+    return
+  }
+
+  badgeCode.value = normalizedValue
   await playScanBeep()
   closeCameraModal()
   await verifyBadge('barcode')
@@ -354,8 +385,9 @@ const startScanner = async (constraints) => {
   )
 }
 
-const openCamera = async () => {
+const openCamera = async (target = 'login') => {
   clearMessages()
+  scannerTarget.value = target
   isCameraModalOpen.value = true
   await nextTick()
 
@@ -477,6 +509,34 @@ const readBadgeWithNfc = async () => {
   }
 }
 
+const checkRosterAssignment = async (source = 'manual') => {
+  clearRosterLookupState()
+
+  if (!rosterBadgeId.value.trim() && !rosterBadgeUsername.value.trim()) {
+    rosterLookupError.value = 'Enter Badge User Name, Badge ID, or scan the badge first.'
+    return
+  }
+
+  isCheckingRoster.value = true
+
+  try {
+    const data = await postJson('/api/public/roster-check', {
+      badgeId: rosterBadgeId.value.trim(),
+      badgeUsername: rosterBadgeUsername.value.trim(),
+    })
+
+    rosterLookupResult.value = {
+      ...data,
+      source,
+    }
+  } catch (error) {
+    rosterLookupResult.value = null
+    rosterLookupError.value = error.message || 'Unable to check the roster right now.'
+  } finally {
+    isCheckingRoster.value = false
+  }
+}
+
 const submitLogin = async () => {
   clearMessages()
 
@@ -568,7 +628,7 @@ onBeforeUnmount(() => {
               </button>
               <button
                 type="button"
-                @click="openCamera"
+                @click="openCamera('login')"
                 :disabled="isCameraLoading"
                 class="login-brand-action inline-flex h-[58px] w-16 shrink-0 items-center justify-center text-white transition disabled:cursor-not-allowed"
               >
@@ -605,7 +665,7 @@ onBeforeUnmount(() => {
               {{ successMessage }}
             </div>
 
-            <div class="mt-5 grid gap-3 sm:grid-cols-2">
+            <div class="mt-5 grid gap-3 sm:grid-cols-3">
               <button
                 type="button"
                 @click="fillDevelopmentLogin"
@@ -613,6 +673,15 @@ onBeforeUnmount(() => {
               >
                 <span class="material-symbols-outlined text-xl">bolt</span>
                 Quick Login
+              </button>
+
+              <button
+                type="button"
+                @click="openRosterModal"
+                class="login-brand-outline inline-flex w-full items-center justify-center gap-2 rounded-2xl border bg-white px-5 py-4 text-base font-medium text-slate-700 transition"
+              >
+                <span class="material-symbols-outlined text-xl">assignment_ind</span>
+                Check Roster
               </button>
 
               <button
@@ -637,7 +706,9 @@ onBeforeUnmount(() => {
       <div class="w-full max-w-lg rounded-[28px] bg-white p-4 shadow-2xl sm:p-5">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-lg font-semibold text-slate-900">Scan Badge Barcode</p>
+            <p class="text-lg font-semibold text-slate-900">
+              {{ scannerTarget === 'roster' ? 'Scan Roster Badge Barcode' : 'Scan Badge Barcode' }}
+            </p>
           </div>
           <button
             type="button"
@@ -696,6 +767,102 @@ onBeforeUnmount(() => {
             >
               <span class="material-symbols-outlined text-lg">videocam_off</span>
               Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="isRosterModalOpen"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 px-4 py-6 backdrop-blur-sm"
+    >
+      <div class="w-full max-w-lg rounded-[28px] bg-white p-5 shadow-2xl sm:p-6">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">Check Roster</p>
+            <p class="mt-1 text-sm text-slate-500">
+              Search using Badge User Name, Badge ID, or scan the badge barcode.
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="closeRosterModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div class="mt-5 space-y-4">
+          <label class="flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <span class="material-symbols-outlined login-brand-accent text-xl">person_search</span>
+            <input
+              v-model="rosterBadgeUsername"
+              type="text"
+              placeholder="Badge User Name"
+              class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
+            />
+          </label>
+
+          <div class="flex overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div class="flex min-w-0 flex-1 items-center px-4 py-4">
+              <span class="material-symbols-outlined login-brand-accent text-xl">badge</span>
+              <input
+                v-model="rosterBadgeId"
+                type="text"
+                placeholder="Badge ID"
+                class="w-full border-none bg-transparent px-3 text-base text-slate-700 outline-none placeholder:text-slate-400"
+              />
+            </div>
+            <button
+              type="button"
+              @click="openCamera('roster')"
+              :disabled="isCameraLoading"
+              class="login-brand-action inline-flex h-[58px] w-16 shrink-0 items-center justify-center text-white transition disabled:cursor-not-allowed"
+            >
+              <span class="material-symbols-outlined text-lg">barcode_scanner</span>
+            </button>
+          </div>
+
+          <div
+            v-if="rosterLookupError"
+            class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+          >
+            {{ rosterLookupError }}
+          </div>
+
+          <div
+            v-if="rosterLookupResult"
+            class="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4"
+          >
+            <p class="text-sm text-slate-500">
+              {{ rosterLookupResult.associate?.fullName || 'Associate' }}
+              <span v-if="rosterLookupResult.rosterName"> | {{ rosterLookupResult.rosterName }}</span>
+            </p>
+            <p class="mt-3 text-2xl font-semibold text-slate-900">
+              {{ rosterLookupResult.assignmentLabel }}
+            </p>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              @click="closeRosterModal"
+              class="login-brand-outline inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium text-slate-700 transition"
+            >
+              <span class="material-symbols-outlined text-lg">close</span>
+              Close
+            </button>
+
+            <button
+              type="button"
+              @click="checkRosterAssignment"
+              :disabled="isCheckingRoster"
+              class="login-brand-action inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-white transition disabled:cursor-not-allowed"
+            >
+              <span class="material-symbols-outlined text-lg">search</span>
+              {{ isCheckingRoster ? 'Checking...' : 'Check Assignment' }}
             </button>
           </div>
         </div>

@@ -4734,6 +4734,32 @@ const formatRosterV2Payload = (roster, assignmentRows = []) => {
   }
 }
 
+const getLatestRosterV2 = async () => {
+  await ensureRosterStationV2Schema()
+  const rows = await query(
+    `
+      SELECT rosters.*, admins.full_name AS creator_name
+      FROM rosters
+      LEFT JOIN admins ON admins.id = rosters.created_by_admin_id
+      ORDER BY rosters.updated_at DESC, rosters.id DESC
+      LIMIT 1
+    `,
+  )
+
+  return rows[0]
+}
+
+const getRosterLookupAssignmentLabel = (row) => {
+  if (!row) {
+    return 'Now Assigned'
+  }
+
+  const sectionLabel = rosterV2SectionLabelMap.get(normalizeRosterV2SectionKey(row.section_key)) || row.section_key
+  const stationCode = `${row.station_code || ''}`.trim()
+
+  return stationCode ? `${sectionLabel} - ${stationCode}` : `${sectionLabel} - No Station`
+}
+
 const parseRosterAssignmentsV2 = (assignments) => {
   if (!Array.isArray(assignments)) {
     return []
@@ -5164,6 +5190,88 @@ app.delete('/api/rosters-v2/:id', async (req, res) => {
     return res.json({ success: true, message: 'Roster deleted successfully.' })
   } catch (error) {
     return res.status(500).json({ message: 'Unable to delete roster.', error: error.message })
+  }
+})
+
+app.post('/api/public/roster-check', async (req, res) => {
+  const badgeId = `${req.body?.badgeId || ''}`.trim()
+  const badgeUsername = `${req.body?.badgeUsername || ''}`.trim()
+
+  if (!badgeId && !badgeUsername) {
+    return res.status(400).json({ message: 'Badge ID or Badge User Name is required.' })
+  }
+
+  try {
+    await ensureRosterStationV2Schema()
+
+    const employeeRows = await query(
+      `
+        SELECT id, badge_id, badge_username, full_name
+        FROM employees
+        WHERE employment_status = 'ACTIVE'
+          AND (
+            (? <> '' AND badge_id = ?)
+            OR (? <> '' AND LOWER(COALESCE(badge_username, '')) = LOWER(?))
+          )
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+      `,
+      [badgeId, badgeId, badgeUsername, badgeUsername],
+    )
+
+    const employee = employeeRows[0] || null
+    const targetRoster = (await getVisibleRoster()) || (await getLatestRosterV2())
+
+    if (!targetRoster || !employee) {
+      return res.json({
+        success: true,
+        assigned: false,
+        assignmentLabel: 'Now Assigned',
+        rosterName: targetRoster?.name || '',
+        associate: employee
+          ? {
+              badgeId: employee.badge_id,
+              badgeUsername: employee.badge_username || '',
+              fullName: employee.full_name,
+            }
+          : null,
+      })
+    }
+
+    const assignmentRows = await query(
+      `
+        SELECT
+          roster_assignments.section_key,
+          roster_assignments.detail_key,
+          roster_assignments.floor_code,
+          stations.station_code,
+          stations.floor_code AS station_floor_code,
+          stations.station_type,
+          stations.is_far_away
+        FROM roster_assignments
+        LEFT JOIN stations ON stations.id = roster_assignments.station_id
+        WHERE roster_assignments.roster_id = ?
+          AND roster_assignments.employee_id = ?
+        LIMIT 1
+      `,
+      [targetRoster.id, employee.id],
+    )
+
+    const assignment = assignmentRows[0] || null
+
+    return res.json({
+      success: true,
+      assigned: Boolean(assignment),
+      assignmentLabel: getRosterLookupAssignmentLabel(assignment),
+      rosterName: targetRoster.name,
+      associate: {
+        badgeId: employee.badge_id,
+        badgeUsername: employee.badge_username || '',
+        fullName: employee.full_name,
+      },
+    })
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to check the roster right now.', error: error.message })
   }
 })
 
