@@ -28,6 +28,7 @@ const searchTerm = ref('')
 const employeeSearch = ref('')
 const showCreateModal = ref(false)
 const showStationsModal = ref(false)
+const showStationListModal = ref(false)
 const showSwapModal = ref(false)
 const editingRosterId = ref(null)
 const submitError = ref('')
@@ -51,6 +52,13 @@ const pendingSwap = reactive({
   employeeId: null,
   targetStationId: null,
   occupiedEmployeeId: null,
+})
+const stationListModalState = reactive({
+  title: '',
+  description: '',
+  accentClass: '',
+  emptyMessage: '',
+  stations: [],
 })
 
 const filteredRosters = computed(() =>
@@ -222,6 +230,24 @@ const openStationsModal = () => {
 
 const closeStationsModal = () => {
   showStationsModal.value = false
+}
+
+const closeStationListModal = () => {
+  showStationListModal.value = false
+  stationListModalState.title = ''
+  stationListModalState.description = ''
+  stationListModalState.accentClass = ''
+  stationListModalState.emptyMessage = ''
+  stationListModalState.stations = []
+}
+
+const openStationListModal = ({ title, description, accentClass, emptyMessage, stations: entries }) => {
+  stationListModalState.title = title
+  stationListModalState.description = description
+  stationListModalState.accentClass = accentClass
+  stationListModalState.emptyMessage = emptyMessage
+  stationListModalState.stations = entries
+  showStationListModal.value = true
 }
 
 const updateAssignment = (employeeId, nextAssignment) => {
@@ -516,7 +542,7 @@ const deleteRoster = async (roster) => {
                 <p class="mt-2 text-xs text-slate-400">Created by {{ roster.creator }}</p>
                 <p class="mt-2 text-xs text-slate-400">
                   {{ roster.assignedStationCount || 0 }} stations assigned
-                  <span v-if="roster.farAwayAssignedCount"> · {{ roster.farAwayAssignedCount }} far away</span>
+                  <span v-if="roster.farAwayAssignedCount"> | {{ roster.farAwayAssignedCount }} far away</span>
                 </p>
               </td>
               <td class="px-4 py-5">
@@ -674,7 +700,7 @@ const deleteRoster = async (roster) => {
                     <div class="flex items-center justify-between gap-3">
                       <p class="font-semibold text-slate-800">{{ section.label }}</p>
                       <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-                        {{ section.associates.length }} associates · {{ section.assignedStations }} stations
+                        {{ section.associates.length }} associates | {{ section.assignedStations }} stations
                       </span>
                     </div>
                     <div class="mt-3 flex flex-wrap gap-2">
@@ -749,7 +775,7 @@ const deleteRoster = async (roster) => {
                     <div class="min-w-0">
                       <p class="font-semibold text-slate-800">{{ employee.fullName }}</p>
                       <p class="mt-1 text-xs text-slate-400">
-                        {{ employee.badgeId }} · {{ employee.departmentName }} / {{ employee.roleName }}
+                        {{ employee.badgeId }} | {{ employee.departmentName }} / {{ employee.roleName }}
                       </p>
                     </div>
                   </div>
@@ -894,28 +920,24 @@ const deleteRoster = async (roster) => {
                     <p class="text-lg font-semibold text-slate-900">{{ group.title }}</p>
                     <p class="mt-1 text-sm text-slate-500">Normal station pool for {{ group.floorCode }}.</p>
                   </div>
-                  <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                    {{ group.stations.length }} stations
-                  </span>
-                </div>
-                <div class="mt-4 flex flex-wrap gap-3">
-                  <div
-                    v-for="station in group.stations"
-                    :key="station.id"
-                    class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                  <button
+                    type="button"
+                    @click="
+                      openStationListModal({
+                        title: group.title,
+                        description: 'Created normal stations for ' + group.floorCode + '.',
+                        accentClass: 'bg-slate-100 text-slate-700',
+                        emptyMessage: 'No stations added for ' + group.floorCode + ' yet.',
+                        stations: group.stations,
+                      })
+                    "
+                    class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
                   >
-                    <span class="font-semibold">{{ station.label }}</span>
-                    <span class="rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">{{ station.stationType }}</span>
-                    <button
-                      type="button"
-                      @click="deleteStation(station)"
-                      :disabled="deletingStationId === station.id"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-full text-rose-500 disabled:opacity-60"
-                    >
-                      <span class="material-symbols-outlined text-base">delete</span>
-                    </button>
-                  </div>
-                  <p v-if="!group.stations.length" class="text-sm text-slate-400">No stations added for this floor yet.</p>
+                    {{ group.stations.length }} stations
+                  </button>
+                </div>
+                <div class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                  Click the station count to view the full {{ group.floorCode }} list in a separate popup.
                 </div>
               </section>
 
@@ -925,28 +947,24 @@ const deleteRoster = async (roster) => {
                     <p class="text-lg font-semibold text-slate-900">Far Away Stations</p>
                     <p class="mt-1 text-sm text-slate-500">Use these only when there is no empty normal station left.</p>
                   </div>
-                  <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                    {{ farAwayStations.length }} stations
-                  </span>
-                </div>
-                <div class="mt-4 flex flex-wrap gap-3">
-                  <div
-                    v-for="station in farAwayStations"
-                    :key="station.id"
-                    class="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  <button
+                    type="button"
+                    @click="
+                      openStationListModal({
+                        title: 'Far Away Stations',
+                        description: 'Fallback stations that should only be assigned when no normal station is empty.',
+                        accentClass: 'bg-amber-50 text-amber-700',
+                        emptyMessage: 'No far away stations added yet.',
+                        stations: farAwayStations,
+                      })
+                    "
+                    class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-amber-100"
                   >
-                    <span class="font-semibold">{{ station.label }}</span>
-                    <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">{{ station.stationType }}</span>
-                    <button
-                      type="button"
-                      @click="deleteStation(station)"
-                      :disabled="deletingStationId === station.id"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-full text-rose-500 disabled:opacity-60"
-                    >
-                      <span class="material-symbols-outlined text-base">delete</span>
-                    </button>
-                  </div>
-                  <p v-if="!farAwayStations.length" class="text-sm text-slate-400">No far away stations added yet.</p>
+                    {{ farAwayStations.length }} stations
+                  </button>
+                </div>
+                <div class="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/90 px-4 py-4 text-sm text-slate-500">
+                  Click the station count to open the Far Away list in a separate popup.
                 </div>
               </section>
             </div>
@@ -955,6 +973,67 @@ const deleteRoster = async (roster) => {
       </div>
     </div>
 
+    <div
+      v-if="showStationListModal"
+      class="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/50 px-4 py-4"
+    >
+      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p class="text-xl font-semibold text-slate-900">{{ stationListModalState.title }}</p>
+            <p class="mt-1 text-sm text-slate-500">{{ stationListModalState.description }}</p>
+          </div>
+          <button
+            type="button"
+            @click="closeStationListModal"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500"
+          >
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div class="flex items-center justify-between gap-3">
+            <span
+              class="rounded-full px-3 py-1 text-xs font-semibold"
+              :class="stationListModalState.accentClass || 'bg-slate-100 text-slate-700'"
+            >
+              {{ stationListModalState.stations.length }} stations
+            </span>
+          </div>
+
+          <div v-if="stationListModalState.stations.length" class="mt-5 grid gap-3 sm:grid-cols-2">
+            <div
+              v-for="station in stationListModalState.stations"
+              :key="station.id"
+              class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            >
+              <div class="min-w-0">
+                <p class="font-semibold text-slate-800">{{ station.label }}</p>
+                <p class="mt-1 text-xs text-slate-500">
+                  {{ station.stationType }}<span v-if="station.isFarAway"> · Far Away</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="deleteStation(station)"
+                :disabled="deletingStationId === station.id"
+                class="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 bg-white text-rose-500 disabled:opacity-60"
+              >
+                <span class="material-symbols-outlined text-base">delete</span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-else
+            class="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500"
+          >
+            {{ stationListModalState.emptyMessage }}
+          </div>
+        </div>
+      </div>
+    </div>
     <div v-if="showSwapModal" class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 px-4">
       <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
         <div class="flex items-start justify-between gap-4">
